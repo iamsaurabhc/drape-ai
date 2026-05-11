@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Sparkles,
   Save,
@@ -12,8 +12,10 @@ import {
   Lock,
   Trash2,
   Image as ImageIcon,
+  Maximize2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Lightbox, type LightboxItem } from "@/components/lightbox";
 
 type Category =
   | "top"
@@ -130,6 +132,7 @@ export default function GarmentStudio({
 
   const [assets, setAssets] = useState<SavedAsset[]>(initialAssets);
   const [libraryFilter, setLibraryFilter] = useState<Category | "all">("all");
+  const [lightbox, setLightbox] = useState<LightboxItem | null>(null);
 
   const handleGenerate = useCallback(async () => {
     setGenerating(true);
@@ -245,6 +248,25 @@ export default function GarmentStudio({
     libraryFilter === "all"
       ? assets
       : assets.filter((a) => a.metadata.category === libraryFilter);
+
+  const assetsByCategory = useMemo(() => {
+    const buckets: Record<Category, SavedAsset[]> = {
+      top: [],
+      bottom: [],
+      outer: [],
+      dress: [],
+      bag: [],
+      shoes: [],
+      accessory: [],
+    };
+    const uncategorised: SavedAsset[] = [];
+    for (const a of assets) {
+      const cat = a.metadata.category;
+      if (cat && cat in buckets) buckets[cat as Category].push(a);
+      else uncategorised.push(a);
+    }
+    return { buckets, uncategorised };
+  }, [assets]);
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 py-10">
@@ -425,12 +447,28 @@ export default function GarmentStudio({
                 <p className="text-sm">Generating packshot...</p>
               </div>
             ) : result ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={result.imageUrl}
-                alt="Generated garment"
-                className="h-full w-full object-contain"
-              />
+              <button
+                type="button"
+                onClick={() =>
+                  setLightbox({
+                    url: result.imageUrl,
+                    alt: "Generated garment",
+                    caption: `Generated garment · ${result.category} · ${result.model}`,
+                  })
+                }
+                className="group relative h-full w-full"
+                title="Click to view full size"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={result.imageUrl}
+                  alt="Generated garment"
+                  className="h-full w-full object-contain"
+                />
+                <span className="absolute right-2 top-2 flex items-center gap-1 rounded-md bg-black/60 px-2 py-1 text-[10px] font-medium text-white opacity-0 transition group-hover:opacity-100">
+                  <Maximize2 className="size-3" /> View full size
+                </span>
+              </button>
             ) : (
               <div className="flex flex-col items-center gap-2 text-zinc-400">
                 <ImageIcon className="size-8" />
@@ -498,44 +536,152 @@ export default function GarmentStudio({
       {/* ---------- Library ---------- */}
       <section className="flex flex-col gap-4">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 pb-3 dark:border-zinc-800">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
-            Library{" "}
-            <span className="text-zinc-400">({filteredAssets.length})</span>
-          </h2>
+          <div className="flex flex-col">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
+              Library{" "}
+              <span className="text-zinc-400">
+                ({libraryFilter === "all" ? assets.length : filteredAssets.length})
+              </span>
+            </h2>
+            <p className="text-xs text-zinc-500">
+              Click any garment to view full size. Filter by category, or browse
+              everything grouped below.
+            </p>
+          </div>
           <div className="flex flex-wrap gap-1.5">
             <FilterChip
               active={libraryFilter === "all"}
               onClick={() => setLibraryFilter("all")}
             >
-              All
+              All ({assets.length})
             </FilterChip>
-            {categories.map((c) => (
-              <FilterChip
-                key={c.id}
-                active={libraryFilter === c.id}
-                onClick={() => setLibraryFilter(c.id)}
-              >
-                {c.label}
-              </FilterChip>
-            ))}
+            {categories.map((c) => {
+              const n = assetsByCategory.buckets[c.id]?.length ?? 0;
+              if (n === 0) return null;
+              return (
+                <FilterChip
+                  key={c.id}
+                  active={libraryFilter === c.id}
+                  onClick={() => setLibraryFilter(c.id)}
+                >
+                  {c.label} ({n})
+                </FilterChip>
+              );
+            })}
           </div>
         </div>
 
-        {filteredAssets.length === 0 ? (
+        {assets.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 py-12 text-zinc-400 dark:border-zinc-800 dark:bg-zinc-900">
             <ImageIcon className="size-8" />
             <p className="text-sm">
               No garments yet — generate or upload one above.
             </p>
           </div>
+        ) : libraryFilter !== "all" ? (
+          // Filtered view: flat grid of one category
+          filteredAssets.length === 0 ? (
+            <EmptyCategoryNote categoryLabel={
+              categories.find((c) => c.id === libraryFilter)?.label ?? libraryFilter
+            } />
+          ) : (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+              {filteredAssets.map((a) => (
+                <LibraryTile
+                  key={a.id ?? a.publicUrl}
+                  asset={a}
+                  onDelete={handleDelete}
+                  onView={() =>
+                    setLightbox({
+                      url: a.publicUrl,
+                      alt: a.name,
+                      caption: `${a.metadata.category ?? ""} · ${a.name}`,
+                    })
+                  }
+                />
+              ))}
+            </div>
+          )
         ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-            {filteredAssets.map((a) => (
-              <LibraryTile key={a.id ?? a.publicUrl} asset={a} onDelete={handleDelete} />
-            ))}
+          // "All" view: grouped by category for easier browsing
+          <div className="flex flex-col gap-6">
+            {categories.map((cat) => {
+              const items = assetsByCategory.buckets[cat.id] ?? [];
+              if (items.length === 0) return null;
+              return (
+                <div key={cat.id} className="flex flex-col gap-2">
+                  <div className="flex items-baseline justify-between">
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
+                      {cat.label}{" "}
+                      <span className="text-zinc-400">({items.length})</span>
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={() => setLibraryFilter(cat.id)}
+                      className="text-[11px] text-zinc-500 underline-offset-2 hover:text-zinc-900 hover:underline dark:hover:text-zinc-200"
+                    >
+                      Filter to {cat.label.toLowerCase()} only
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                    {items.map((a) => (
+                      <LibraryTile
+                        key={a.id ?? a.publicUrl}
+                        asset={a}
+                        onDelete={handleDelete}
+                        onView={() =>
+                          setLightbox({
+                            url: a.publicUrl,
+                            alt: a.name,
+                            caption: `${cat.label} · ${a.name}`,
+                          })
+                        }
+                      />
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+            {assetsByCategory.uncategorised.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                  Uncategorised{" "}
+                  <span className="text-zinc-400">
+                    ({assetsByCategory.uncategorised.length})
+                  </span>
+                </h3>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                  {assetsByCategory.uncategorised.map((a) => (
+                    <LibraryTile
+                      key={a.id ?? a.publicUrl}
+                      asset={a}
+                      onDelete={handleDelete}
+                      onView={() =>
+                        setLightbox({
+                          url: a.publicUrl,
+                          alt: a.name,
+                          caption: a.name,
+                        })
+                      }
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </section>
+
+      <Lightbox item={lightbox} onClose={() => setLightbox(null)} />
+    </div>
+  );
+}
+
+function EmptyCategoryNote({ categoryLabel }: { categoryLabel: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 py-10 text-zinc-400 dark:border-zinc-800 dark:bg-zinc-900">
+      <ImageIcon className="size-8" />
+      <p className="text-sm">No {categoryLabel.toLowerCase()} items yet.</p>
     </div>
   );
 }
@@ -566,22 +712,33 @@ function Header() {
 function LibraryTile({
   asset,
   onDelete,
+  onView,
 }: {
   asset: SavedAsset;
   onDelete: (id: string) => void;
+  onView: () => void;
 }) {
   const cat = asset.metadata.category ?? "—";
-  const source = asset.metadata.source ?? (asset.generatedByModel ? "generated" : "uploaded");
+  const source =
+    asset.metadata.source ?? (asset.generatedByModel ? "generated" : "uploaded");
   return (
     <div className="group relative overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="flex aspect-square w-full items-center justify-center bg-zinc-50 dark:bg-zinc-950">
+      <button
+        type="button"
+        onClick={onView}
+        title="View full size"
+        className="flex aspect-square w-full items-center justify-center bg-zinc-50 dark:bg-zinc-950"
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={asset.publicUrl}
           alt={asset.name}
           className="h-full w-full object-contain transition group-hover:scale-[1.02]"
         />
-      </div>
+        <span className="pointer-events-none absolute left-2 top-2 flex items-center gap-1 rounded-md bg-black/60 px-2 py-1 text-[10px] font-medium text-white opacity-0 transition group-hover:opacity-100">
+          <Maximize2 className="size-3" /> Full size
+        </span>
+      </button>
       <div className="flex items-start justify-between gap-2 p-2.5">
         <div className="min-w-0">
           <p className="truncate text-xs font-medium text-zinc-900 dark:text-zinc-100">

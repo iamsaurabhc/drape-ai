@@ -74,7 +74,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </li>
             );
           })}
-          <li className="ml-2 border-l border-zinc-200 pl-2 dark:border-zinc-800">
+          {/* <li className="ml-2 border-l border-zinc-200 pl-2 dark:border-zinc-800">
             <a
               href={GITHUB_URL}
               target="_blank"
@@ -84,7 +84,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             >
               <GithubIcon />
             </a>
-          </li>
+          </li> */}
         </ul>
       </nav>
       <main className="flex-1">{children}</main>
@@ -95,33 +95,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <span className="font-semibold text-zinc-700 dark:text-zinc-300">
                 Drape
               </span>{" "}
-              — open source · MIT licensed · built on{" "}
-              <a
-                href="https://fal.ai"
-                target="_blank"
-                rel="noreferrer"
-                className="underline hover:text-zinc-900 dark:hover:text-zinc-100"
-              >
-                fal.ai
-              </a>
-              ,{" "}
-              <a
-                href="https://higgsfield.ai"
-                target="_blank"
-                rel="noreferrer"
-                className="underline hover:text-zinc-900 dark:hover:text-zinc-100"
-              >
-                Higgsfield
-              </a>
-              , and{" "}
-              <a
-                href="https://supabase.com"
-                target="_blank"
-                rel="noreferrer"
-                className="underline hover:text-zinc-900 dark:hover:text-zinc-100"
-              >
-                Supabase
-              </a>
             </p>
             <p className="text-[10px] text-zinc-400">
               Generate hyperreal models, generate garments, compose multi-garment outfits — at $0.06 per image.

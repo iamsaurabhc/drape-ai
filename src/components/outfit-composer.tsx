@@ -16,9 +16,11 @@ import {
   X,
   ChevronDown,
   ChevronUp,
+  Maximize2,
 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { Lightbox, type LightboxItem } from "@/components/lightbox";
 
 // -----------------------------------------------------------------------------
 // Types (mirror src/lib/assets.ts and src/lib/outfits.ts)
@@ -116,6 +118,7 @@ export default function OutfitComposer({
   >(null);
 
   const [outfits, setOutfits] = useState<Outfit[]>(recentOutfits);
+  const [lightbox, setLightbox] = useState<LightboxItem | null>(null);
 
   const filteredGarments = useMemo(
     () =>
@@ -510,12 +513,30 @@ export default function OutfitComposer({
                   <p className="text-xs">Composing with {modelLabel}...</p>
                 </div>
               ) : result && result.images[selectedImageIdx] ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={result.images[selectedImageIdx].url}
-                  alt="Composed outfit"
-                  className="h-full w-full object-contain"
-                />
+                <button
+                  type="button"
+                  onClick={() =>
+                    setLightbox({
+                      url: result.images[selectedImageIdx].url,
+                      alt: "Composed outfit",
+                      caption: `Composed outfit · ${modelLabel} · variation ${
+                        selectedImageIdx + 1
+                      } of ${result.images.length}`,
+                    })
+                  }
+                  className="group relative h-full w-full"
+                  title="Click to view full size"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={result.images[selectedImageIdx].url}
+                    alt="Composed outfit"
+                    className="h-full w-full object-contain"
+                  />
+                  <span className="absolute right-2 top-2 flex items-center gap-1 rounded-md bg-black/60 px-2 py-1 text-[10px] font-medium text-white opacity-0 transition group-hover:opacity-100">
+                    <Maximize2 className="size-3" /> View full size
+                  </span>
+                </button>
               ) : (
                 <div className="flex flex-col items-center gap-2 text-zinc-400">
                   <ImageIcon className="size-8" />
@@ -626,11 +647,24 @@ export default function OutfitComposer({
                 key={o.id}
                 outfit={o}
                 onDelete={handleDeleteOutfit}
+                onView={() => {
+                  if (!o.resultImageUrl) return;
+                  const pieces = o.garments
+                    .map((g) => g.category ?? "garment")
+                    .join(" + ");
+                  setLightbox({
+                    url: o.resultImageUrl,
+                    alt: o.characterName ?? "outfit",
+                    caption: `${o.characterName ?? "outfit"} · ${pieces}`,
+                  });
+                }}
               />
             ))}
           </div>
         )}
       </section>
+
+      <Lightbox item={lightbox} onClose={() => setLightbox(null)} />
     </div>
   );
 }
@@ -815,24 +849,37 @@ function SelectedGarmentsStrip({
 function OutfitTile({
   outfit,
   onDelete,
+  onView,
 }: {
   outfit: Outfit;
   onDelete: (id: string) => void;
+  onView: () => void;
 }) {
   return (
-    <div className="group overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="flex aspect-[3/4] items-center justify-center bg-zinc-50 dark:bg-zinc-950">
+    <div className="group relative overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+      <button
+        type="button"
+        onClick={onView}
+        disabled={!outfit.resultImageUrl}
+        title="View full size"
+        className="flex aspect-[3/4] w-full items-center justify-center bg-zinc-50 disabled:cursor-default dark:bg-zinc-950"
+      >
         {outfit.resultImageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={outfit.resultImageUrl}
-            alt={outfit.characterName ?? "outfit"}
-            className="h-full w-full object-cover transition group-hover:scale-[1.02]"
-          />
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={outfit.resultImageUrl}
+              alt={outfit.characterName ?? "outfit"}
+              className="h-full w-full object-cover transition group-hover:scale-[1.02]"
+            />
+            <span className="pointer-events-none absolute left-2 top-2 flex items-center gap-1 rounded-md bg-black/60 px-2 py-1 text-[10px] font-medium text-white opacity-0 transition group-hover:opacity-100">
+              <Maximize2 className="size-3" /> Full size
+            </span>
+          </>
         ) : (
           <ImageIcon className="size-8 text-zinc-400" />
         )}
-      </div>
+      </button>
       <div className="flex items-start justify-between gap-2 p-2.5">
         <div className="min-w-0 flex-1">
           <p className="truncate text-xs font-medium text-zinc-900 dark:text-zinc-100">

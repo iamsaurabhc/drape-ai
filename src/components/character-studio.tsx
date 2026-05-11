@@ -9,8 +9,12 @@ import {
   AlertCircle,
   CheckCircle2,
   Lock,
+  Maximize2,
+  Trash2,
+  Image as ImageIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Lightbox, type LightboxItem } from "@/components/lightbox";
 
 type ModelId =
   | "higgsfield-soul"
@@ -41,6 +45,17 @@ type GenerationResult = {
   requestId: string;
 };
 
+type SavedCharacter = {
+  id: string | null;
+  name: string;
+  type: "character" | "garment" | "backdrop";
+  publicUrl: string;
+  prompt: string | null;
+  generatedByModel: string | null;
+  metadata: Record<string, unknown>;
+  storedInSupabase: boolean;
+};
+
 const STYLE_PRESETS: { id: StylePreset; label: string; hint: string }[] = [
   { id: "editorial", label: "Editorial", hint: "Magazine-quality, soft front light" },
   { id: "streetwear", label: "Streetwear", hint: "Candid, natural daylight, urban" },
@@ -65,9 +80,11 @@ const PROMPT_TEMPLATES = [
 export default function CharacterStudio({
   models,
   defaultModel,
+  initialCharacters = [],
 }: {
   models: ModelOption[];
   defaultModel: ModelId;
+  initialCharacters?: SavedCharacter[];
 }) {
   const [prompt, setPrompt] = useState(PROMPT_TEMPLATES[0]);
   const [style, setStyle] = useState<StylePreset>("editorial");
@@ -85,6 +102,9 @@ export default function CharacterStudio({
     | { kind: "ok"; storedInSupabase: boolean }
     | { kind: "err"; message: string }
   >(null);
+
+  const [characters, setCharacters] = useState<SavedCharacter[]>(initialCharacters);
+  const [lightbox, setLightbox] = useState<LightboxItem | null>(null);
 
   const selectedModelCfg = models.find((m) => m.id === model);
   const selectedAvailable = selectedModelCfg?.available ?? false;
@@ -134,6 +154,9 @@ export default function CharacterStudio({
         setSaveStatus({ kind: "err", message: data.error ?? "Save failed." });
       } else {
         setSaveStatus({ kind: "ok", storedInSupabase: data.storedInSupabase });
+        if (data.storedInSupabase) {
+          setCharacters((prev) => [data, ...prev]);
+        }
       }
     } catch (err) {
       setSaveStatus({
@@ -142,6 +165,22 @@ export default function CharacterStudio({
       });
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleDelete(id: string) {
+    if (!id) return;
+    if (!confirm("Delete this character from your library?")) return;
+    try {
+      const res = await fetch(`/api/assets/${id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error ?? "Failed to delete.");
+        return;
+      }
+      setCharacters((prev) => prev.filter((c) => c.id !== id));
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Network error.");
     }
   }
 
@@ -315,12 +354,28 @@ export default function CharacterStudio({
                 </p>
               </div>
             ) : result ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={result.imageUrl}
-                alt="Generated character"
-                className="h-full w-full object-contain"
-              />
+              <button
+                type="button"
+                onClick={() =>
+                  setLightbox({
+                    url: result.imageUrl,
+                    alt: "Generated character",
+                    caption: `Generated character · ${result.model}`,
+                  })
+                }
+                className="group relative h-full w-full"
+                title="Click to view full size"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={result.imageUrl}
+                  alt="Generated character"
+                  className="h-full w-full object-contain"
+                />
+                <span className="absolute right-2 top-2 flex items-center gap-1 rounded-md bg-black/60 px-2 py-1 text-[10px] font-medium text-white opacity-0 transition group-hover:opacity-100">
+                  <Maximize2 className="size-3" /> View full size
+                </span>
+              </button>
             ) : (
               <div className="flex flex-col items-center gap-2 text-zinc-400">
                 <Sparkles className="size-8" />
@@ -392,6 +447,104 @@ export default function CharacterStudio({
             </div>
           )}
         </section>
+      </div>
+
+      {/* ---------- Saved characters library ---------- */}
+      <section className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 pb-3 dark:border-zinc-800">
+          <div className="flex flex-col">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
+              Saved characters{" "}
+              <span className="text-zinc-400">({characters.length})</span>
+            </h2>
+            <p className="text-xs text-zinc-500">
+              Click any character to view full size. Reuse them in the Outfit
+              Composer.
+            </p>
+          </div>
+        </div>
+
+        {characters.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-zinc-300 bg-zinc-50 py-12 text-zinc-400 dark:border-zinc-800 dark:bg-zinc-900">
+            <ImageIcon className="size-8" />
+            <p className="text-sm">
+              No saved characters yet — generate one above and click{" "}
+              <b>Save as character</b>.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            {characters.map((c) => (
+              <CharacterLibraryTile
+                key={c.id ?? c.publicUrl}
+                character={c}
+                onView={() =>
+                  setLightbox({
+                    url: c.publicUrl,
+                    alt: c.name,
+                    caption: `${c.name}${c.generatedByModel ? ` · ${c.generatedByModel}` : ""}`,
+                  })
+                }
+                onDelete={() => c.id && handleDelete(c.id)}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <Lightbox item={lightbox} onClose={() => setLightbox(null)} />
+    </div>
+  );
+}
+
+function CharacterLibraryTile({
+  character,
+  onView,
+  onDelete,
+}: {
+  character: SavedCharacter;
+  onView: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="group relative overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+      <button
+        type="button"
+        onClick={onView}
+        className="block aspect-[3/4] w-full bg-zinc-50 dark:bg-zinc-950"
+        title="View full size"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={character.publicUrl}
+          alt={character.name}
+          className="h-full w-full object-cover transition group-hover:scale-[1.02]"
+        />
+        <span className="pointer-events-none absolute left-2 top-2 flex items-center gap-1 rounded-md bg-black/60 px-2 py-1 text-[10px] font-medium text-white opacity-0 transition group-hover:opacity-100">
+          <Maximize2 className="size-3" /> Full size
+        </span>
+      </button>
+      <div className="flex items-start justify-between gap-2 p-2.5">
+        <div className="min-w-0">
+          <p className="truncate text-xs font-medium text-zinc-900 dark:text-zinc-100">
+            {character.name}
+          </p>
+          {character.generatedByModel && (
+            <p className="mt-0.5 truncate text-[10px] uppercase tracking-wider text-zinc-500">
+              {character.generatedByModel}
+            </p>
+          )}
+        </div>
+        {character.id && (
+          <button
+            type="button"
+            onClick={onDelete}
+            title="Delete"
+            className="rounded-md p-1 text-zinc-400 transition hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+        )}
       </div>
     </div>
   );

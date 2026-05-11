@@ -5,6 +5,7 @@ import {
   isModelAvailable,
   type CharacterModelId,
 } from "@/lib/character";
+import { listAssets } from "@/lib/assets";
 
 export const metadata = {
   title: "Character Studio — Drape",
@@ -12,20 +13,30 @@ export const metadata = {
     "Generate a hyperreal model that anchors every outfit in the batch.",
 };
 
-export default function CharacterPage() {
-  const models = (Object.keys(CHARACTER_MODELS) as CharacterModelId[]).map((id) => {
-    const cfg = CHARACTER_MODELS[id];
-    return {
-      id,
-      label: cfg.label,
-      provider: cfg.provider,
-      estCostUsd: cfg.estCostUsd,
-      description: cfg.description,
-      available: isModelAvailable(id),
-    };
-  });
+export const dynamic = "force-dynamic";
+
+export default async function CharacterPage() {
+  const models = (Object.keys(CHARACTER_MODELS) as CharacterModelId[]).map(
+    (id) => {
+      const cfg = CHARACTER_MODELS[id];
+      return {
+        id,
+        label: cfg.label,
+        provider: cfg.provider,
+        estCostUsd: cfg.estCostUsd,
+        description: cfg.description,
+        available: isModelAvailable(id),
+      };
+    },
+  );
+
+  const initialCharacters = await listAssets({ type: "character", limit: 100 });
 
   return (
-    <CharacterStudio models={models} defaultModel={defaultCharacterModel()} />
+    <CharacterStudio
+      models={models}
+      defaultModel={defaultCharacterModel()}
+      initialCharacters={initialCharacters}
+    />
   );
 }
