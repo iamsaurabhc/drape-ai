@@ -1,0 +1,19 @@
+# Netlify configuration for the Next.js app.
+# The @netlify/plugin-nextjs adapter is auto-installed when Netlify detects
+# Next.js, but pinning it here makes the build reproducible.
+
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Generated images are fetched from fal / Higgsfield CDNs and shown via <img>.
+# Whitelist those origins so future image-optimisation domains don't 404.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "strict-origin-when-cross-origin"
