@@ -1,0 +1,63 @@
+Build a Batch AI Image Pipeline for Fashion Outfits (50–100 SKUs per run)
+Posted 9 hours ago
+Worldwide
+
+Summary
+The goal
+We're building a scalable system that takes our product photos (jackets, shirts, trousers, in cotton, wool and knit etc.) and transforms them into professional fashion photos of an AI-generated model wearing complete outfits — at scale. Think 50-100 outfits per collection, fully styled and consistent, ready for e-commerce listings, social campaigns, and PDP pages.
+
+We've already validated that AI can produce the quality we need on a per-outfit basis. The challenge now is scale — we need a workflow that lets us feed in a batch of outfits and get back a batch of finished images, without manual intervention between outfits.
+
+What you'll be working on
+You'll design and build the pipeline that connects the dots between:
+
+Input — a structured list of outfits (each with its garment images and a model reference)
+
+Generation — the AI image step that produces the model wearing each complete outfit on a consistent backdrop
+
+Output — finished photos automatically delivered to a Google Drive folder, organized per outfit
+
+The output should look authentic, premium, and brand-ready — natural fabric drape, accurate garment fit, consistent lighting, and the same model identity across every photo. We're aiming for fashion campaign quality, not basic AI mockups.
+
+Who we're looking for
+The ideal collaborator has experience in both AI image generation for fashion and workflow automation. You should be comfortable with advanced AI tools and understand how to chain them into a repeatable pipeline.
+
+Equally important: you understand fashion aesthetics. You can tell the difference between an AI-generated photo that looks "almost right" and one that's commercially ready. Garment fit, fabric texture, closures, layering, shadows, model consistency — these matter.
+
+You should also be comfortable with workflow automation tools — n8n, Make, ComfyUI, or custom code — to handle the batch logic, error retries, and output organization.
+
+What we already have
+A working manual pipeline that produces good single-outfit output (currently in Magnific Spaces — but we're not committed to that platform if you propose something better) as the API is useless 
+
+We also trained this pipeline:
+A trained AI model identity (LoRA) for our brand
+A current automated pipeline built on fal.ai (Kling Try-On + Nano Banana edit + Topaz upscale) that produces ~33% quality per review - so not good enough
+Sample garments and reference photos to test with
+
+
+What you'll deliver
+A working batch pipeline that takes a list of outfits and produces finished photos
+Documentation so we can add new collections without your help in the future
+One real test run on 10 of our outfits
+A short handover loom link 
+
+
+Important details
+We need consistency across images — same model, same backdrop, same lighting feel
+Multi-garment composition (jacket + shirt + trousers in one image) is the hardest part of this work — please address how your approach handles it
+Cost per finished image should be reasonable (under $0.50 in AI compute is a rough target)
+Wall-clock for a 50-outfit batch should be under an hour
+
+
+To apply
+Please share:
+
+Screenshots or samples of a previous AI image pipeline you've built — ideally something involving fashion, multi-garment composition, or batch processing
+Examples of finished AI fashion model visuals from your portfolio
+The stack and tools you'd propose for this project (fal.ai, ComfyUI, n8n, Make, Magnific, custom code, etc.) and why
+How you'd build it end-to-end — input intake, generation, batch handling, output delivery
+Whether you'd reuse any of our existing setup (Magnific Spaces pipeline, the fal.ai pipeline with Kling Try-On + Nano Banana + Topaz, our trained model LoRA) or rebuild from scratch — and why
+How you'd handle multi-garment composition specifically — this is where most pipelines break
+Estimated build time + your price (fixed price preferred)
+
+We're looking for someone who can move fast and bring fashion-grade taste to the technical work. If this sounds like you, we'd love to see your portfolio.
