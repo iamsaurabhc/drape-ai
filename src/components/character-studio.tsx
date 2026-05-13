@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Lightbox, type LightboxItem } from "@/components/lightbox";
+import { SkeletonImage } from "@/components/skeleton-image";
+import { useToast } from "@/components/toast";
 
 type ModelId =
   | "higgsfield-soul"
@@ -106,6 +108,8 @@ export default function CharacterStudio({
   const [characters, setCharacters] = useState<SavedCharacter[]>(initialCharacters);
   const [lightbox, setLightbox] = useState<LightboxItem | null>(null);
 
+  const toast = useToast();
+
   const selectedModelCfg = models.find((m) => m.id === model);
   const selectedAvailable = selectedModelCfg?.available ?? false;
 
@@ -175,12 +179,13 @@ export default function CharacterStudio({
       const res = await fetch(`/api/assets/${id}`, { method: "DELETE" });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        alert(data.error ?? "Failed to delete.");
+        toast.error(data.error ?? "Failed to delete.");
         return;
       }
       setCharacters((prev) => prev.filter((c) => c.id !== id));
+      toast.success("Character removed from library.");
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Network error.");
+      toast.error(err instanceof Error ? err.message : "Network error.");
     }
   }
 
@@ -354,8 +359,12 @@ export default function CharacterStudio({
                 </p>
               </div>
             ) : result ? (
-              <button
-                type="button"
+              <SkeletonImage
+                src={result.imageUrl}
+                alt="Generated character"
+                className="group h-full w-full animate-fade-in"
+                objectFit="contain"
+                eager
                 onClick={() =>
                   setLightbox({
                     url: result.imageUrl,
@@ -363,19 +372,8 @@ export default function CharacterStudio({
                     caption: `Generated character · ${result.model}`,
                   })
                 }
-                className="group relative h-full w-full"
                 title="Click to view full size"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={result.imageUrl}
-                  alt="Generated character"
-                  className="h-full w-full object-contain"
-                />
-                <span className="absolute right-2 top-2 flex items-center gap-1 rounded-md bg-black/60 px-2 py-1 text-[10px] font-medium text-white opacity-0 transition group-hover:opacity-100">
-                  <Maximize2 className="size-3" /> View full size
-                </span>
-              </button>
+              />
             ) : (
               <div className="flex flex-col items-center gap-2 text-zinc-400">
                 <Sparkles className="size-8" />
@@ -508,22 +506,20 @@ function CharacterLibraryTile({
 }) {
   return (
     <div className="group relative overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-      <button
-        type="button"
-        onClick={onView}
-        className="block aspect-[3/4] w-full bg-zinc-50 dark:bg-zinc-950"
-        title="View full size"
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+      <div className="relative">
+        <SkeletonImage
           src={character.publicUrl}
           alt={character.name}
-          className="h-full w-full object-cover transition group-hover:scale-[1.02]"
+          className="aspect-[3/4] w-full bg-zinc-50 dark:bg-zinc-950"
+          imgClassName="transition group-hover:scale-[1.02]"
+          objectFit="cover"
+          onClick={onView}
+          title="View full size"
         />
         <span className="pointer-events-none absolute left-2 top-2 flex items-center gap-1 rounded-md bg-black/60 px-2 py-1 text-[10px] font-medium text-white opacity-0 transition group-hover:opacity-100">
           <Maximize2 className="size-3" /> Full size
         </span>
-      </button>
+      </div>
       <div className="flex items-start justify-between gap-2 p-2.5">
         <div className="min-w-0">
           <p className="truncate text-xs font-medium text-zinc-900 dark:text-zinc-100">

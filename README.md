@@ -107,14 +107,36 @@ The library is filterable, deletable, and persistent — build it once, reuse ac
 
 ### Stage 3 — Outfit Composer (`/composer`)
 
-Pick a saved character + 1–8 garments. Drape:
+Pick a saved character + 1–8 garments + a **background preset** (`Studio White`, `Studio Gray`, `Outdoor Street`, or `Golden Hour`). Drape:
 
 1. Resolves all asset URLs from Supabase.
-2. Builds a structured prompt referencing every input as `Image 1, Image 2, …` with explicit content descriptions (`Image 2 shows the outerwear (camel coat); Image 3 shows the bottom (navy trousers); …`).
+2. Builds a structured prompt referencing every input as `Image 1, Image 2, …` with explicit content descriptions (`Image 2 shows the outerwear (camel coat); Image 3 shows the bottom (navy trousers); …`) and the selected scene prose (`Place the model in this scene: sunlit urban street …`).
 3. Sends a single `fal-ai/bytedance/seedream/v4.5/edit` call with all reference images at 1024×1280 (4:5 — fashion e-commerce standard).
 4. Saves the result back to Supabase Storage, mirroring the image off the fal CDN so it's yours.
 
+The Composer's saved-outfit gallery is grouped by character ("by model") by default so a 50-outfit batch stays browsable; flip the toggle for a most-recent flat view. All thumbnails lazy-load with shimmering skeleton placeholders and a non-blocking toast system so a slow Supabase tile never freezes the rest of the UI.
+
 No virtual try-on chains. No upscaling step. No identity drift.
+
+### Stage 4 — Image to Video (`/videos`)
+
+Every saved outfit can be animated into a 4-15 second cinematic clip via one of three fal.ai image-to-video models — picked from the same per-tile drawer that drives the Composer.
+
+fal.ai bills image-to-video as `duration × resolution_factor`, so the drawer surfaces both knobs as explicit chips and shows the live estimated cost as `duration × $/s` next to the Generate button (with an amber warning band once an estimate crosses $1). Default resolutions are conservative — `480p` on Fast, `720p` on Pro and Kling — so the cheapest valid render is always one click away. The numbers below are USD per output second at each resolution; multiply by the chosen duration to get the total for a single render.
+
+| Model | Endpoint | Wait | 480p | 720p | 1080p |
+|---|---|---|---|---|---|
+| **Seedance 2.0 Fast** | `bytedance/seedance-2.0/fast/image-to-video` | 30-60s | $0.10/s | $0.24/s | — |
+| **Seedance 2.0** (flagship) | `bytedance/seedance-2.0/image-to-video` | 60-120s | $0.06/s | $0.13/s | $0.23/s |
+| **Kling 3.0 Pro** | `fal-ai/kling-video/v3/pro/image-to-video` | 90-180s | — | $0.112/s (fixed) | — |
+
+So a 5s × 720p Seedance 2.0 Pro preview lands at ~\$0.65, while a 15s × 1080p hero render of the same model lands at ~\$3.45 — we learned that one the hard way on the first migration. Kling 3.0 Pro's fal endpoint doesn't expose a resolution dial at all (the resolution chip is hidden in the UI) and bills at a single flat per-second rate. Each model also has a different input schema (Seedance uses `image_url`, Kling uses `start_image_url`, neither accepts the other's resolution / aspect / audio knobs); `src/lib/video.ts` declares the body shape per-model so a stale UI never causes a 422 mid-render.
+
+The drawer surfaces **seven motion preset categories** — `Subtle Studio`, `Editorial Turn`, `Walk Forward`, `Catwalk Pass`, `Detail Pan`, `Hair & Fabric`, and `Custom` — so users pick what kind of motion they want without writing prompts. Each preset prefills (but leaves editable) a tuned prompt; the generated MP4 is mirrored into Supabase Storage and surfaced on the dedicated `/videos` page grouped by character with filters for character / motion / model.
+
+Generation is non-blocking — `POST /api/video/generate` submits to `fal.queue.submit` and returns immediately with a `running` row. The client polls `GET /api/video/[id]/status` every few seconds; the route calls `fal.queue.status` + `fal.queue.result` and finalises the row once the MP4 is mirrored to Supabase. This keeps Kling 3.0 Pro (90-180s renders) within Netlify's 60s function timeout.
+
+All three video models reuse the existing `FAL_KEY` credential — no extra setup beyond what the Composer already needs.
 
 ---
 
@@ -192,8 +214,11 @@ If Higgsfield keys are absent, the Character Studio falls back to fal.ai's Nano 
 
 1. Create a new Supabase project (free tier is fine for the demo).
 2. Open the SQL Editor in your project dashboard.
-3. Paste and run the contents of [`supabase/migrations/0001_initial.sql`](supabase/migrations/0001_initial.sql).
-   This creates the `assets`, `batches`, and `outfits` tables, plus a public `generated-assets` storage bucket with sane RLS policies.
+3. Paste and run the contents of [`supabase/migrations/0001_initial.sql`](supabase/migrations/0001_initial.sql) (creates the `assets`, `batches`, and `outfits` tables + the public `generated-assets` storage bucket with sane RLS policies).
+4. Then run [`supabase/migrations/0002_videos.sql`](supabase/migrations/0002_videos.sql) (adds the `outfits.background_preset` column and the `outfit_videos` table powering Stage 4).
+5. Run [`supabase/migrations/0003_video_async.sql`](supabase/migrations/0003_video_async.sql) (adds the provider status-url column — required by the non-blocking submit + poll flow).
+6. Run [`supabase/migrations/0004_video_fal.sql`](supabase/migrations/0004_video_fal.sql) (renames the Higgsfield-era columns to vendor-neutral names since image-to-video has moved to fal.ai entirely — Seedance 2.0 / Kling 3.0 Pro). Any existing `outfit_videos` rows from the Higgsfield era will surface as `failed` after the next status poll; delete them manually if you want a clean gallery.
+7. Finally run [`supabase/migrations/0005_video_resolution.sql`](supabase/migrations/0005_video_resolution.sql) (adds `outfit_videos.resolution` so the gallery can display "5s · 720p" and the cost column reflects what was actually rendered).
 
 No Supabase CLI or local linking required.
 
@@ -254,7 +279,8 @@ If you ship a fashion brand using Drape, or fork it for something tangentially r
 
 - [x] **Stage 1** — Character Studio (Higgsfield Soul + fal.ai Nano Banana / FLUX)
 - [x] **Stage 2** — Garment Studio (generate + upload + categorised library)
-- [x] **Stage 3** — Outfit Composer (single-outfit Seedream 4.5 Edit)
+- [x] **Stage 3** — Outfit Composer (single-outfit Seedream 4.5 Edit + 4 background presets)
+- [x] **Stage 4** — Image to Video (fal.ai Seedance 2.0 Fast / Seedance 2.0 / Kling 3.0 Pro, 7 motion presets, 4-15s)
 - [ ] **Batch runner** — queue 50+ outfits from a CSV/JSON, watch them populate live with progress bars
 - [ ] **Google Drive / S3 / Shopify delivery** — auto-deliver approved outfits to your CMS
 - [ ] **Approval workflow** — accept / regenerate / reject per outfit
@@ -271,33 +297,49 @@ PRs welcome on any of the above.
 ```
 src/
   app/
-    page.tsx                  # marketing home
-    character/page.tsx        # Stage 1
-    garments/page.tsx         # Stage 2
-    composer/page.tsx         # Stage 3
+    page.tsx                       # marketing home
+    character/page.tsx             # Stage 1
+    garments/page.tsx              # Stage 2
+    composer/page.tsx              # Stage 3
+    videos/page.tsx                # Stage 4 (image-to-video gallery)
     api/
       character/{generate,save}/route.ts
       garment/{generate,save,upload}/route.ts
       outfit/{generate,save}/route.ts
       outfits/{list,[id]}/route.ts
       assets/{list,[id]}/route.ts
+      video/generate/route.ts      # fal.ai image-to-video dispatch (Seedance 2.0 / Kling 3.0)
+      video/[id]/status/route.ts   # one-shot fal queue.status check (async polling)
+      videos/{list,[id]}/route.ts
   components/
-    app-shell.tsx             # nav + footer
+    app-shell.tsx                  # nav + footer
     character-studio.tsx
     garment-studio.tsx
-    outfit-composer.tsx       # the big one
+    outfit-composer.tsx            # the big one (Stage 3 UI + grouped gallery)
+    video-composer-drawer.tsx      # Stage 4 per-outfit drawer
+    videos-gallery.tsx             # /videos page UI
+    skeleton-image.tsx             # lazy <img> wrapper w/ shimmer + fade
+    toast.tsx                      # non-blocking toast provider
+    lightbox.tsx
   lib/
-    env.ts                    # type-safe env access
-    fal.ts                    # fal.ai client + composition prompt builder
-    higgsfield.ts             # Higgsfield API (submit-and-poll)
-    character.ts              # unified character dispatcher
-    garment.ts                # garment generation orchestration
-    assets.ts                 # Supabase asset CRUD
-    outfits.ts                # Supabase outfit CRUD
-    supabase.ts               # client factories
+    env.ts                         # type-safe env access
+    fal.ts                         # fal.ai client + composition prompt + BACKGROUND_PRESETS
+    higgsfield.ts                  # Higgsfield API — Soul character generation
+    fal-video.ts                   # fal.ai image-to-video queue wrapper
+    character.ts                   # unified character dispatcher
+    garment.ts                     # garment generation orchestration
+    video.ts                       # Stage 4 — VIDEO_MODELS + MOTION_PRESETS + dispatcher
+    assets.ts                      # Supabase asset CRUD
+    outfits.ts                     # Supabase outfit CRUD
+    outfit_videos.ts               # Supabase outfit-video CRUD
+    supabase.ts                    # client factories
 supabase/
-  migrations/0001_initial.sql # one-shot schema
-netlify.toml                  # Netlify build config
+  migrations/0001_initial.sql      # core schema
+  migrations/0002_videos.sql       # outfit_videos + outfits.background_preset
+  migrations/0003_video_async.sql  # outfit_videos provider status URL (async poll)
+  migrations/0004_video_fal.sql    # rename provider columns when moving video to fal.ai
+  migrations/0005_video_resolution.sql # store resolution per row for honest cost reporting
+netlify.toml                       # Netlify build config
 ```
 
 ---

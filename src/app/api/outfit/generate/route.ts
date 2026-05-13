@@ -30,6 +30,9 @@ const Body = z.object({
   numImages: z
     .union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)])
     .optional(),
+  backgroundPreset: z
+    .enum(["studio-white", "studio-gray", "outdoor-street", "golden-hour"])
+    .optional(),
 });
 
 export async function POST(req: Request) {
@@ -130,6 +133,7 @@ export async function POST(req: Request) {
       garments,
       promptOverride: body.promptOverride,
       numImages: body.numImages,
+      backgroundPreset: body.backgroundPreset,
     });
 
     return NextResponse.json({
@@ -139,6 +143,7 @@ export async function POST(req: Request) {
       estCostUsd: COMPOSITION_MODEL.estCostUsd * (body.numImages ?? 1),
       characterId: body.characterId,
       garmentIds: body.garmentIds,
+      backgroundPreset: body.backgroundPreset ?? null,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown fal error.";

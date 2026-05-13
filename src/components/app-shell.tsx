@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { User, Shirt, Layers, Images } from "lucide-react";
+import { User, Shirt, Layers, Film, Images } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV = [
   { href: "/character", label: "Character", icon: User, available: true },
   { href: "/garments", label: "Garments", icon: Shirt, available: true },
   { href: "/composer", label: "Composer", icon: Layers, available: true },
+  { href: "/videos", label: "Videos", icon: Film, available: true },
   { href: "/batches", label: "Batches", icon: Images, available: false },
 ];
 

@@ -57,7 +57,9 @@ async function submit(
   modelId: string,
   body: Record<string, unknown>,
 ): Promise<HiggsfieldSubmitResponse> {
-  const res = await fetch(`${BASE_URL}/${modelId}`, {
+  const url = `${BASE_URL}/${modelId}`;
+  console.log(`[higgsfield] POST ${modelId}`);
+  const res = await fetch(url, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -67,33 +69,42 @@ async function submit(
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
+    console.error(
+      `[higgsfield] submit ${modelId} failed: ${res.status} ${text.slice(0, 300)}`,
+    );
     throw new Error(
       `Higgsfield submit failed (${res.status}): ${text.slice(0, 300) || res.statusText}`,
     );
   }
-  return res.json();
+  const json = (await res.json()) as HiggsfieldSubmitResponse;
+  console.log(
+    `[higgsfield] ${modelId} submitted — request_id=${json.request_id} status=${json.status}`,
+  );
+  return json;
 }
 
 async function poll(
   statusUrl: string,
   opts: { timeoutMs?: number; pollIntervalMs?: number } = {},
 ): Promise<HiggsfieldStatusResponse> {
+  // Default 3 min for images; callers (video) bump this to 5 min for slower
+  // models like Kling 2.1 Pro.
   const timeoutMs = opts.timeoutMs ?? 180_000;
   const pollIntervalMs = opts.pollIntervalMs ?? 2000;
   const started = Date.now();
+  let lastStatus = "";
 
   while (true) {
-    const res = await fetch(statusUrl, {
-      headers: { authorization: authHeader() },
-      cache: "no-store",
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(
-        `Higgsfield status check failed (${res.status}): ${text.slice(0, 300) || res.statusText}`,
+    const data = await fetchStatusOnce(statusUrl);
+
+    if (data.status !== lastStatus) {
+      console.log(
+        `[higgsfield] status_url poll → status=${data.status} (t=${Math.round(
+          (Date.now() - started) / 1000,
+        )}s)`,
       );
+      lastStatus = data.status;
     }
-    const data = (await res.json()) as HiggsfieldStatusResponse;
 
     if (data.status === "completed") return data;
     if (data.status === "failed") {
@@ -111,6 +122,22 @@ async function poll(
     }
     await new Promise((r) => setTimeout(r, pollIntervalMs));
   }
+}
+
+async function fetchStatusOnce(
+  statusUrl: string,
+): Promise<HiggsfieldStatusResponse> {
+  const res = await fetch(statusUrl, {
+    headers: { authorization: authHeader() },
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      `Higgsfield status check failed (${res.status}): ${text.slice(0, 300) || res.statusText}`,
+    );
+  }
+  return (await res.json()) as HiggsfieldStatusResponse;
 }
 
 // -----------------------------------------------------------------------------
@@ -156,3 +183,9 @@ export async function generateSoulStandard(
     requestId: submission.request_id,
   };
 }
+
+// -----------------------------------------------------------------------------
+// Image-to-video used to live here, but we moved it to fal.ai entirely —
+// see src/lib/fal-video.ts. Soul (Stage A character generation) is the only
+// Higgsfield surface this app still hits.
+// -----------------------------------------------------------------------------

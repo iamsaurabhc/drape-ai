@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Lightbox, type LightboxItem } from "@/components/lightbox";
+import { SkeletonImage } from "@/components/skeleton-image";
+import { useToast } from "@/components/toast";
 
 type Category =
   | "top"
@@ -134,6 +136,8 @@ export default function GarmentStudio({
   const [libraryFilter, setLibraryFilter] = useState<Category | "all">("all");
   const [lightbox, setLightbox] = useState<LightboxItem | null>(null);
 
+  const toast = useToast();
+
   const handleGenerate = useCallback(async () => {
     setGenerating(true);
     setError(null);
@@ -229,20 +233,24 @@ export default function GarmentStudio({
     [category],
   );
 
-  const handleDelete = useCallback(async (id: string) => {
-    if (!id) return;
-    try {
-      const res = await fetch(`/api/assets/${id}`, { method: "DELETE" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        alert(data.error ?? "Failed to delete.");
-        return;
+  const handleDelete = useCallback(
+    async (id: string) => {
+      if (!id) return;
+      try {
+        const res = await fetch(`/api/assets/${id}`, { method: "DELETE" });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          toast.error(data.error ?? "Failed to delete.");
+          return;
+        }
+        setAssets((a) => a.filter((x) => x.id !== id));
+        toast.success("Garment removed from library.");
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Network error.");
       }
-      setAssets((a) => a.filter((x) => x.id !== id));
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Network error.");
-    }
-  }, []);
+    },
+    [toast],
+  );
 
   const filteredAssets =
     libraryFilter === "all"
@@ -447,8 +455,12 @@ export default function GarmentStudio({
                 <p className="text-sm">Generating packshot...</p>
               </div>
             ) : result ? (
-              <button
-                type="button"
+              <SkeletonImage
+                src={result.imageUrl}
+                alt="Generated garment"
+                className="group h-full w-full animate-fade-in"
+                objectFit="contain"
+                eager
                 onClick={() =>
                   setLightbox({
                     url: result.imageUrl,
@@ -456,19 +468,8 @@ export default function GarmentStudio({
                     caption: `Generated garment · ${result.category} · ${result.model}`,
                   })
                 }
-                className="group relative h-full w-full"
                 title="Click to view full size"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={result.imageUrl}
-                  alt="Generated garment"
-                  className="h-full w-full object-contain"
-                />
-                <span className="absolute right-2 top-2 flex items-center gap-1 rounded-md bg-black/60 px-2 py-1 text-[10px] font-medium text-white opacity-0 transition group-hover:opacity-100">
-                  <Maximize2 className="size-3" /> View full size
-                </span>
-              </button>
+              />
             ) : (
               <div className="flex flex-col items-center gap-2 text-zinc-400">
                 <ImageIcon className="size-8" />
@@ -723,22 +724,20 @@ function LibraryTile({
     asset.metadata.source ?? (asset.generatedByModel ? "generated" : "uploaded");
   return (
     <div className="group relative overflow-hidden rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-      <button
-        type="button"
-        onClick={onView}
-        title="View full size"
-        className="flex aspect-square w-full items-center justify-center bg-zinc-50 dark:bg-zinc-950"
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
+      <div className="relative">
+        <SkeletonImage
           src={asset.publicUrl}
           alt={asset.name}
-          className="h-full w-full object-contain transition group-hover:scale-[1.02]"
+          className="aspect-square w-full bg-zinc-50 dark:bg-zinc-950"
+          imgClassName="transition group-hover:scale-[1.02]"
+          objectFit="contain"
+          onClick={onView}
+          title="View full size"
         />
         <span className="pointer-events-none absolute left-2 top-2 flex items-center gap-1 rounded-md bg-black/60 px-2 py-1 text-[10px] font-medium text-white opacity-0 transition group-hover:opacity-100">
           <Maximize2 className="size-3" /> Full size
         </span>
-      </button>
+      </div>
       <div className="flex items-start justify-between gap-2 p-2.5">
         <div className="min-w-0">
           <p className="truncate text-xs font-medium text-zinc-900 dark:text-zinc-100">

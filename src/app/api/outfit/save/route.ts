@@ -24,6 +24,9 @@ const Body = z.object({
   sourceImageUrl: z.string().url(),
   falRequestId: z.string().optional(),
   costUsd: z.number().min(0),
+  backgroundPreset: z
+    .enum(["studio-white", "studio-gray", "outdoor-street", "golden-hour"])
+    .optional(),
 });
 
 export async function POST(req: Request) {

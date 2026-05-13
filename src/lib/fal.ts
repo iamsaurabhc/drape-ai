@@ -255,10 +255,57 @@ export type GarmentRef = {
   name?: string;
 };
 
+// -----------------------------------------------------------------------------
+// Background presets — prompt-only scene controls. We keep `backdropUrl`
+// available for future reference-image upgrades, but the four presets here
+// drive the scene via prose, which Seedream follows reliably.
+// -----------------------------------------------------------------------------
+
+export type BackgroundPresetId =
+  | "studio-white"
+  | "studio-gray"
+  | "outdoor-street"
+  | "golden-hour";
+
+export const BACKGROUND_PRESETS: Record<
+  BackgroundPresetId,
+  { id: BackgroundPresetId; label: string; hint: string; promptFragment: string }
+> = {
+  "studio-white": {
+    id: "studio-white",
+    label: "Studio White",
+    hint: "Clean seamless white, e-commerce default",
+    promptFragment:
+      "pure white seamless studio backdrop, soft even diffused front lighting, no visible floor seam, clean e-commerce / PDP look",
+  },
+  "studio-gray": {
+    id: "studio-gray",
+    label: "Studio Gray",
+    hint: "Neutral mid-gray editorial paper",
+    promptFragment:
+      "neutral mid-gray editorial paper backdrop, soft side fill light, fashion magazine lighting, subtle shadow under feet",
+  },
+  "outdoor-street": {
+    id: "outdoor-street",
+    label: "Outdoor Street",
+    hint: "Sunlit urban backdrop",
+    promptFragment:
+      "sunlit urban street scene with soft natural daylight, slightly defocused real-world city background behind the model, realistic depth of field, candid editorial fashion energy",
+  },
+  "golden-hour": {
+    id: "golden-hour",
+    label: "Golden Hour",
+    hint: "Warm low-angle sunset light",
+    promptFragment:
+      "outdoor golden-hour scene with warm low-angle sunlight, soft rim lighting on the model, blurred natural background, cinematic campaign atmosphere",
+  },
+};
+
 export type ComposeOutfitInput = {
   characterUrl: string;
   garments: GarmentRef[];
   backdropUrl?: string;
+  backgroundPreset?: BackgroundPresetId;
   promptOverride?: string;
   numImages?: 1 | 2 | 3 | 4;
 };
@@ -297,9 +344,15 @@ function buildCompositionPrompt(input: ComposeOutfitInput): string {
   const garmentImageRange =
     input.garments.length === 1 ? "Image 2" : `Images 2-${1 + input.garments.length}`;
 
+  const presetFragment = input.backgroundPreset
+    ? BACKGROUND_PRESETS[input.backgroundPreset].promptFragment
+    : null;
+
   const backdropClause = input.backdropUrl
     ? `Image ${totalImages} sets the backdrop, lighting, and colour temperature — match it exactly. Do NOT use the white product backgrounds from ${garmentImageRange} in the final scene.`
-    : `Use the exact same backdrop, lighting, and colour temperature as Image 1. Do NOT use the white product backgrounds from ${garmentImageRange} in the final scene.`;
+    : presetFragment
+      ? `Place the model in this scene: ${presetFragment}. Do NOT use the white product backgrounds from ${garmentImageRange} in the final scene — replace them with the scene described.`
+      : `Use the exact same backdrop, lighting, and colour temperature as Image 1. Do NOT use the white product backgrounds from ${garmentImageRange} in the final scene.`;
 
   const pose = derivePose(input.garments);
   const layering = describeLayering(input.garments);

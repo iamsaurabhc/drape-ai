@@ -22,6 +22,7 @@ export type StoredOutfit = {
   resultImageUrl: string | null;
   falRequestId: string | null;
   costUsd: number;
+  backgroundPreset: string | null;
   error: string | null;
   createdAt: string;
   finishedAt: string | null;
@@ -35,6 +36,7 @@ export type SaveOutfitInput = {
   sourceImageUrl: string;
   falRequestId?: string;
   costUsd: number;
+  backgroundPreset?: string;
 };
 
 /**
@@ -83,6 +85,7 @@ export async function saveCompletedOutfit(
       result_storage_path: path,
       fal_request_id: input.falRequestId ?? null,
       cost_usd: input.costUsd,
+      background_preset: input.backgroundPreset ?? null,
       finished_at: new Date().toISOString(),
     })
     .select("id, created_at")
@@ -105,7 +108,7 @@ export async function getOutfitById(id: string): Promise<StoredOutfit | null> {
   const { data, error } = await sb
     .from("outfits")
     .select(
-      "id, character_id, garment_ids, prompt_override, status, result_image_url, fal_request_id, cost_usd, error, created_at, finished_at",
+      "id, character_id, garment_ids, prompt_override, status, result_image_url, fal_request_id, cost_usd, background_preset, error, created_at, finished_at",
     )
     .eq("id", id)
     .single();
@@ -119,7 +122,7 @@ export async function listOutfits(opts: { limit?: number } = {}): Promise<Stored
   const { data, error } = await sb
     .from("outfits")
     .select(
-      "id, character_id, garment_ids, prompt_override, status, result_image_url, fal_request_id, cost_usd, error, created_at, finished_at",
+      "id, character_id, garment_ids, prompt_override, status, result_image_url, fal_request_id, cost_usd, background_preset, error, created_at, finished_at",
     )
     .order("created_at", { ascending: false })
     .limit(opts.limit ?? 50);
@@ -161,6 +164,7 @@ interface RawOutfitRow {
   result_image_url: string | null;
   fal_request_id: string | null;
   cost_usd: number | string;
+  background_preset: string | null;
   error: string | null;
   created_at: string;
   finished_at: string | null;
@@ -214,6 +218,7 @@ async function hydrateOutfit(raw: RawOutfitRow): Promise<StoredOutfit> {
     falRequestId: raw.fal_request_id,
     costUsd:
       typeof raw.cost_usd === "string" ? parseFloat(raw.cost_usd) : raw.cost_usd,
+    backgroundPreset: raw.background_preset,
     error: raw.error,
     createdAt: raw.created_at,
     finishedAt: raw.finished_at,

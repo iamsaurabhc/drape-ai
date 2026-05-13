@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect } from "react";
-import { X, Download, ExternalLink } from "lucide-react";
+import { useEffect, useState } from "react";
+import { X, Download, ExternalLink, Loader2 } from "lucide-react";
 
 export type LightboxItem = {
   url: string;
@@ -16,8 +16,22 @@ export function Lightbox({
   item: LightboxItem | null;
   onClose: () => void;
 }) {
+  if (!item) return null;
+  // Key by url so the inner `loaded` state naturally resets whenever a
+  // different image opens — no setState-in-effect needed.
+  return <LightboxInner key={item.url} item={item} onClose={onClose} />;
+}
+
+function LightboxInner({
+  item,
+  onClose,
+}: {
+  item: LightboxItem;
+  onClose: () => void;
+}) {
+  const [loaded, setLoaded] = useState(false);
+
   useEffect(() => {
-    if (!item) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
@@ -28,9 +42,7 @@ export function Lightbox({
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = prevOverflow;
     };
-  }, [item, onClose]);
-
-  if (!item) return null;
+  }, [onClose]);
 
   return (
     <div
@@ -44,12 +56,24 @@ export function Lightbox({
         onClick={(e) => e.stopPropagation()}
         className="relative flex max-h-full max-w-7xl flex-col items-center gap-3"
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={item.url}
-          alt={item.alt}
-          className="max-h-[88vh] max-w-full rounded-lg object-contain shadow-2xl"
-        />
+        <div className="relative flex max-h-[88vh] min-h-[200px] min-w-[200px] items-center justify-center">
+          {!loaded && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Loader2 className="size-8 animate-spin text-white/70" />
+            </div>
+          )}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={item.url}
+            alt={item.alt}
+            decoding="async"
+            onLoad={() => setLoaded(true)}
+            onError={() => setLoaded(true)}
+            className={`max-h-[88vh] max-w-full rounded-lg object-contain shadow-2xl transition-opacity duration-300 ${
+              loaded ? "opacity-100" : "opacity-0"
+            }`}
+          />
+        </div>
 
         <div className="flex w-full items-center justify-between gap-3 text-xs text-white/80">
           <p className="truncate">{item.caption ?? item.alt}</p>

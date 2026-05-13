@@ -24,3 +24,58 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Skeleton shimmer + toast animations -------------------------------------- */
+@keyframes drape-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes drape-toast-in {
+  0% {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes drape-fade-in {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes drape-drawer-in {
+  0% {
+    transform: translateX(100%);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@utility animate-shimmer {
+  animation: drape-shimmer 1.6s ease-in-out infinite;
+}
+
+@utility animate-toast-in {
+  animation: drape-toast-in 220ms ease-out;
+}
+
+@utility animate-fade-in {
+  animation: drape-fade-in 240ms ease-out;
+}
+
+@utility animate-drawer-in {
+  animation: drape-drawer-in 260ms cubic-bezier(0.22, 1, 0.36, 1);
+}
