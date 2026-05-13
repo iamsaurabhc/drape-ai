@@ -13,6 +13,8 @@ import {
   Image as ImageIcon,
   User as UserIcon,
   Shirt,
+  Glasses,
+  Eye,
   X,
   ChevronDown,
   ChevronUp,
@@ -21,6 +23,9 @@ import {
   Film,
   LayoutGrid,
   Clock,
+  Pin,
+  PinOff,
+  ArrowUpCircle,
 } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
@@ -90,7 +95,8 @@ type Category =
   | "dress"
   | "bag"
   | "shoes"
-  | "accessory";
+  | "accessory"
+  | "eyewear";
 
 type Asset = {
   id: string | null;
@@ -99,9 +105,31 @@ type Asset = {
   publicUrl: string;
   prompt: string | null;
   generatedByModel: string | null;
-  metadata: { category?: Category; source?: "generated" | "uploaded" };
+  metadata: {
+    category?: Category;
+    source?: "generated" | "uploaded";
+    sku?: string;
+  };
   storedInSupabase: boolean;
+  isPinned?: boolean;
 };
+
+type ComposeMode = "outfit" | "accessory";
+type AccessoryView = "front" | "three-quarter" | "side";
+
+const ACCESSORY_VIEW_OPTIONS: {
+  id: AccessoryView;
+  label: string;
+  hint: string;
+}[] = [
+  { id: "front", label: "Front", hint: "Straight-on, both lenses centred" },
+  {
+    id: "three-quarter",
+    label: "Three-quarter",
+    hint: "30–40° angled, near temple visible",
+  },
+  { id: "side", label: "Side profile", hint: "Pure 90° profile" },
+];
 
 type Outfit = {
   id: string;
@@ -136,7 +164,7 @@ const NUM_IMAGES_OPTIONS = [1, 2, 4] as const;
 // -----------------------------------------------------------------------------
 
 export default function OutfitComposer({
-  characters,
+  characters: initialCharacters,
   garments,
   categories,
   recentOutfits,
@@ -156,16 +184,25 @@ export default function OutfitComposer({
 }) {
   const toast = useToast();
 
+  const [mode, setMode] = useState<ComposeMode>("outfit");
+  // Local mutable copy of the characters prop so we can reflect pin/unpin
+  // optimistically without a full page refresh.
+  const [characters, setCharacters] = useState<Asset[]>(initialCharacters);
   const [characterId, setCharacterId] = useState<string | null>(
-    characters[0]?.id ?? null,
+    initialCharacters[0]?.id ?? null,
   );
   const [selectedGarmentIds, setSelectedGarmentIds] = useState<string[]>([]);
+  const [accessoryId, setAccessoryId] = useState<string | null>(null);
+  const [accessoryView, setAccessoryView] =
+    useState<AccessoryView>("three-quarter");
+  const [upscaleEnabled, setUpscaleEnabled] = useState(true);
   const [filter, setFilter] = useState<Category | "all">("all");
   const [numImages, setNumImages] = useState<1 | 2 | 4>(1);
   const [backgroundPreset, setBackgroundPreset] =
     useState<BackgroundPresetId>("studio-white");
   const [showOverride, setShowOverride] = useState(false);
   const [promptOverride, setPromptOverride] = useState("");
+  const [pinningId, setPinningId] = useState<string | null>(null);
 
   const [generating, setGenerating] = useState(false);
   const [result, setResult] = useState<GenerationResult | null>(null);
@@ -203,13 +240,56 @@ export default function OutfitComposer({
 
   const character = characters.find((c) => c.id === characterId);
 
+  const pinnedCharacters = useMemo(
+    () => characters.filter((c) => c.isPinned),
+    [characters],
+  );
+  const unpinnedCharacters = useMemo(
+    () => characters.filter((c) => !c.isPinned),
+    [characters],
+  );
+
+  // Eyewear pool — only what's loaded already; the existing prop pulls the
+  // full garment library, so we just filter client-side. SKU grouping keeps
+  // the "60 sunglasses models × 4-6 colour variants" catalogue navigable.
+  const eyewearList = useMemo(
+    () => garments.filter((g) => g.metadata.category === "eyewear"),
+    [garments],
+  );
+  const eyewearBySku = useMemo(() => {
+    const groups = new Map<string, Asset[]>();
+    const noSku: Asset[] = [];
+    for (const e of eyewearList) {
+      const sku = e.metadata.sku?.trim();
+      if (sku) {
+        const arr = groups.get(sku) ?? [];
+        arr.push(e);
+        groups.set(sku, arr);
+      } else {
+        noSku.push(e);
+      }
+    }
+    return {
+      groups: Array.from(groups.entries())
+        .map(([sku, items]) => ({ sku, items }))
+        .sort((a, b) => a.sku.localeCompare(b.sku)),
+      noSku,
+    };
+  }, [eyewearList]);
+
+  const selectedAccessory = useMemo(
+    () => eyewearList.find((e) => e.id === accessoryId) ?? null,
+    [eyewearList, accessoryId],
+  );
+
   const canGenerate =
     falReady &&
     supabaseReady &&
     characterId !== null &&
-    selectedGarmentIds.length >= 1 &&
-    selectedGarmentIds.length <= 8 &&
-    !generating;
+    !generating &&
+    (mode === "outfit"
+      ? selectedGarmentIds.length >= 1 && selectedGarmentIds.length <= 8
+      : accessoryId !== null);
 
   const toggleGarment = useCallback((id: string | null) => {
     if (!id) return;
@@ -220,22 +300,38 @@ export default function OutfitComposer({
 
   const handleGenerate = useCallback(async () => {
     if (!characterId) return;
+    if (mode === "accessory" && !accessoryId) return;
     setGenerating(true);
     setError(null);
     setResult(null);
     try {
+      const payload =
+        mode === "outfit"
+          ? {
+              mode: "outfit" as const,
+              characterId,
+              garmentIds: selectedGarmentIds,
+              promptOverride:
+                showOverride && promptOverride.trim().length >= 20
+                  ? promptOverride.trim()
+                  : undefined,
+              numImages,
+              backgroundPreset,
+            }
+          : {
+              mode: "accessory" as const,
+              characterId,
+              accessoryId,
+              view: accessoryView,
+              upscale: upscaleEnabled,
+              numImages,
+              backgroundPreset,
+            };
+
       const res = await fetch("/api/outfit/generate", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          characterId,
-          garmentIds: selectedGarmentIds,
-          promptOverride: showOverride && promptOverride.trim().length >= 20
-            ? promptOverride.trim()
-            : undefined,
-          numImages,
-          backgroundPreset,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -246,10 +342,12 @@ export default function OutfitComposer({
         setResult(data);
         setSelectedImageIdx(0);
         if (!savingName) {
+          const prefix =
+            mode === "accessory"
+              ? `${(selectedAccessory?.name ?? "eyewear").slice(0, 12)}-${accessoryView}`
+              : (character?.name ?? "outfit").slice(0, 14);
           setSavingName(
-            `${(character?.name ?? "outfit").slice(0, 14)}-${Date.now()
-              .toString(36)
-              .slice(-4)}`,
+            `${prefix}-${Date.now().toString(36).slice(-4)}`,
           );
         }
       }
@@ -261,14 +359,19 @@ export default function OutfitComposer({
       setGenerating(false);
     }
   }, [
+    mode,
     characterId,
     selectedGarmentIds,
+    accessoryId,
+    accessoryView,
+    upscaleEnabled,
     showOverride,
     promptOverride,
     numImages,
     backgroundPreset,
     savingName,
     character,
+    selectedAccessory,
     toast,
   ]);
 
@@ -277,6 +380,13 @@ export default function OutfitComposer({
     const chosen = result.images[selectedImageIdx];
     if (!chosen) return;
 
+    const saveGarmentIds =
+      mode === "outfit"
+        ? selectedGarmentIds
+        : accessoryId
+          ? [accessoryId]
+          : [];
+
     setSaving(true);
     try {
       const res = await fetch("/api/outfit/save", {
@@ -284,9 +394,11 @@ export default function OutfitComposer({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           characterId,
-          garmentIds: selectedGarmentIds,
+          garmentIds: saveGarmentIds,
           promptOverride:
-            showOverride && promptOverride.trim().length >= 20
+            mode === "outfit" &&
+            showOverride &&
+            promptOverride.trim().length >= 20
               ? promptOverride.trim()
               : undefined,
           promptUsed: result.promptUsed,
@@ -300,7 +412,11 @@ export default function OutfitComposer({
       if (!res.ok) {
         toast.error(data.error ?? "Save failed.");
       } else {
-        toast.success("Outfit saved — appears in the gallery below.");
+        toast.success(
+          mode === "accessory"
+            ? "Eyewear shot saved — appears in the gallery below."
+            : "Outfit saved — appears in the gallery below.",
+        );
         setOutfits((prev) => [data, ...prev]);
       }
     } catch (err) {
@@ -309,15 +425,51 @@ export default function OutfitComposer({
       setSaving(false);
     }
   }, [
+    mode,
     result,
     selectedImageIdx,
     characterId,
     selectedGarmentIds,
+    accessoryId,
     showOverride,
     promptOverride,
     backgroundPreset,
     toast,
   ]);
+
+  const handleTogglePin = useCallback(
+    async (id: string | null) => {
+      if (!id) return;
+      const current = characters.find((c) => c.id === id);
+      const next = !current?.isPinned;
+      setPinningId(id);
+      setCharacters((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, isPinned: next } : c)),
+      );
+      try {
+        const res = await fetch(`/api/assets/${id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ isPinned: next }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error ?? "Failed to update pin.");
+        }
+        toast.success(next ? "Pinned model." : "Unpinned model.");
+      } catch (err) {
+        setCharacters((prev) =>
+          prev.map((c) =>
+            c.id === id ? { ...c, isPinned: !next } : c,
+          ),
+        );
+        toast.error(err instanceof Error ? err.message : "Network error.");
+      } finally {
+        setPinningId(null);
+      }
+    },
+    [characters, toast],
+  );
 
   const handleDeleteOutfit = useCallback(
     async (id: string) => {
@@ -453,6 +605,8 @@ export default function OutfitComposer({
         </Banner>
       )}
 
+      <ModeSwitch mode={mode} onChange={setMode} />
+
       <div className="grid grid-cols-1 gap-8 xl:grid-cols-[1fr_440px]">
         {/* ============== LEFT: Selectors ============== */}
         <div className="flex flex-col gap-8">
@@ -464,71 +618,204 @@ export default function OutfitComposer({
                 cta={{ href: "/character", label: "Open Character Studio" }}
               />
             ) : (
-              <div className="flex gap-3 overflow-x-auto pb-2">
-                {characters.map((c) => (
-                  <CharacterTile
-                    key={c.id ?? c.publicUrl}
-                    asset={c}
-                    selected={c.id === characterId}
-                    onClick={() => setCharacterId(c.id)}
-                  />
-                ))}
+              <div className="flex flex-col gap-4">
+                {pinnedCharacters.length > 0 && (
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-300">
+                      <Pin className="size-3" /> Pinned models ·{" "}
+                      <span className="font-normal text-zinc-500">
+                        recurring faces for this catalogue
+                      </span>
+                    </div>
+                    <div className="flex gap-3 overflow-x-auto pb-2">
+                      {pinnedCharacters.map((c) => (
+                        <CharacterTile
+                          key={c.id ?? c.publicUrl}
+                          asset={c}
+                          selected={c.id === characterId}
+                          pinning={pinningId === c.id}
+                          onClick={() => setCharacterId(c.id)}
+                          onTogglePin={() => handleTogglePin(c.id)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {unpinnedCharacters.length > 0 && (
+                  <div className="flex flex-col gap-1.5">
+                    {pinnedCharacters.length > 0 && (
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                        All models
+                      </div>
+                    )}
+                    <div className="flex gap-3 overflow-x-auto pb-2">
+                      {unpinnedCharacters.map((c) => (
+                        <CharacterTile
+                          key={c.id ?? c.publicUrl}
+                          asset={c}
+                          selected={c.id === characterId}
+                          pinning={pinningId === c.id}
+                          onClick={() => setCharacterId(c.id)}
+                          onTogglePin={() => handleTogglePin(c.id)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </Step>
 
-          {/* Step 2 — Garments ---------------------------------------- */}
-          <Step
-            n="2"
-            title="Pick garments"
-            icon={Shirt}
-            subtitle={`${selectedGarmentIds.length} selected · 1–8 allowed`}
-          >
-            {garments.length === 0 ? (
-              <EmptyState
-                message="No garments in your library yet."
-                cta={{ href: "/garments", label: "Open Garment Studio" }}
-              />
-            ) : (
-              <>
-                <div className="mb-3 flex flex-wrap gap-1.5">
-                  <FilterChip
-                    active={filter === "all"}
-                    onClick={() => setFilter("all")}
-                  >
-                    All ({garments.length})
-                  </FilterChip>
-                  {categories.map((c) => {
-                    const n = garments.filter(
-                      (g) => g.metadata.category === c.id,
-                    ).length;
-                    if (n === 0) return null;
+          {/* Step 2 — Garments / Eyewear ------------------------------ */}
+          {mode === "outfit" ? (
+            <Step
+              n="2"
+              title="Pick garments"
+              icon={Shirt}
+              subtitle={`${selectedGarmentIds.length} selected · 1–8 allowed`}
+            >
+              {garments.length === 0 ? (
+                <EmptyState
+                  message="No garments in your library yet."
+                  cta={{ href: "/garments", label: "Open Garment Studio" }}
+                />
+              ) : (
+                <>
+                  <div className="mb-3 flex flex-wrap gap-1.5">
+                    <FilterChip
+                      active={filter === "all"}
+                      onClick={() => setFilter("all")}
+                    >
+                      All ({garments.length})
+                    </FilterChip>
+                    {categories.map((c) => {
+                      const n = garments.filter(
+                        (g) => g.metadata.category === c.id,
+                      ).length;
+                      if (n === 0) return null;
+                      return (
+                        <FilterChip
+                          key={c.id}
+                          active={filter === c.id}
+                          onClick={() => setFilter(c.id)}
+                        >
+                          {c.label} ({n})
+                        </FilterChip>
+                      );
+                    })}
+                  </div>
+                  <div className="grid max-h-[420px] grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4 lg:grid-cols-5">
+                    {filteredGarments.map((g) => (
+                      <GarmentTile
+                        key={g.id ?? g.publicUrl}
+                        asset={g}
+                        selected={
+                          g.id ? selectedGarmentIds.includes(g.id) : false
+                        }
+                        onClick={() => toggleGarment(g.id)}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+            </Step>
+          ) : (
+            <Step
+              n="2"
+              title="Pick eyewear"
+              icon={Glasses}
+              subtitle={
+                selectedAccessory
+                  ? `selected: ${selectedAccessory.name}`
+                  : "single-select · grouped by SKU"
+              }
+            >
+              {eyewearList.length === 0 ? (
+                <EmptyState
+                  message="No eyewear saved yet — generate or upload some under the 'Eyewear' category."
+                  cta={{ href: "/garments", label: "Open Garment Studio" }}
+                />
+              ) : (
+                <div className="flex max-h-[460px] flex-col gap-4 overflow-y-auto pr-1">
+                  {eyewearBySku.groups.map((g) => (
+                    <div key={g.sku} className="flex flex-col gap-1.5">
+                      <h4 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                        SKU {g.sku}{" "}
+                        <span className="font-normal text-zinc-400">
+                          ({g.items.length} colour
+                          {g.items.length === 1 ? "" : "s"})
+                        </span>
+                      </h4>
+                      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-5">
+                        {g.items.map((e) => (
+                          <EyewearTile
+                            key={e.id ?? e.publicUrl}
+                            asset={e}
+                            selected={accessoryId === e.id}
+                            onClick={() => setAccessoryId(e.id)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  {eyewearBySku.noSku.length > 0 && (
+                    <div className="flex flex-col gap-1.5">
+                      <h4 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+                        No SKU
+                      </h4>
+                      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-5">
+                        {eyewearBySku.noSku.map((e) => (
+                          <EyewearTile
+                            key={e.id ?? e.publicUrl}
+                            asset={e}
+                            selected={accessoryId === e.id}
+                            onClick={() => setAccessoryId(e.id)}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* View selector ------------------------------------ */}
+              <div className="mt-4 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+                <Label small>
+                  <Eye className="mr-1 inline-block size-3" /> View angle
+                </Label>
+                <div className="mt-2 grid grid-cols-3 gap-2">
+                  {ACCESSORY_VIEW_OPTIONS.map((v) => {
+                    const active = accessoryView === v.id;
                     return (
-                      <FilterChip
-                        key={c.id}
-                        active={filter === c.id}
-                        onClick={() => setFilter(c.id)}
+                      <button
+                        key={v.id}
+                        type="button"
+                        onClick={() => setAccessoryView(v.id)}
+                        className={cn(
+                          "flex flex-col gap-0.5 rounded-lg border px-2.5 py-2 text-left transition",
+                          active
+                            ? "border-zinc-900 bg-zinc-900 text-white dark:border-white dark:bg-white dark:text-zinc-950"
+                            : "border-zinc-200 bg-white text-zinc-700 hover:border-zinc-400 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-zinc-600",
+                        )}
                       >
-                        {c.label} ({n})
-                      </FilterChip>
+                        <span className="text-xs font-semibold">
+                          {v.label}
+                        </span>
+                        <span
+                          className={cn(
+                            "text-[10px] leading-snug",
+                            active ? "opacity-80" : "text-zinc-500",
+                          )}
+                        >
+                          {v.hint}
+                        </span>
+                      </button>
                     );
                   })}
                 </div>
-                <div className="grid max-h-[420px] grid-cols-3 gap-2 overflow-y-auto sm:grid-cols-4 lg:grid-cols-5">
-                  {filteredGarments.map((g) => (
-                    <GarmentTile
-                      key={g.id ?? g.publicUrl}
-                      asset={g}
-                      selected={
-                        g.id ? selectedGarmentIds.includes(g.id) : false
-                      }
-                      onClick={() => toggleGarment(g.id)}
-                    />
-                  ))}
-                </div>
-              </>
-            )}
-          </Step>
+              </div>
+            </Step>
+          )}
 
           {/* Step 3 — Background preset ------------------------------ */}
           <Step
@@ -579,10 +866,16 @@ export default function OutfitComposer({
           {/* Step 4 — Options + Generate ------------------------------ */}
           <Step n="4" title="Compose" icon={Sparkles}>
             <div className="flex flex-col gap-4">
-              {selectedGarments.length > 0 && (
+              {mode === "outfit" && selectedGarments.length > 0 && (
                 <SelectedGarmentsStrip
                   garments={selectedGarments}
                   onRemove={toggleGarment}
+                />
+              )}
+              {mode === "accessory" && selectedAccessory && (
+                <SelectedAccessoryStrip
+                  asset={selectedAccessory}
+                  onRemove={() => setAccessoryId(null)}
                 />
               )}
 
@@ -613,31 +906,62 @@ export default function OutfitComposer({
                     estimated cost
                   </span>
                   <span className="font-mono text-sm font-medium text-zinc-900 dark:text-zinc-100">
-                    ${(costPerImage * numImages).toFixed(3)}
+                    $
+                    {(
+                      costPerImage * numImages +
+                      (mode === "accessory" && upscaleEnabled
+                        ? 0.03 * numImages
+                        : 0)
+                    ).toFixed(3)}
                   </span>
                 </div>
               </div>
 
-              <button
-                type="button"
-                onClick={() => setShowOverride((v) => !v)}
-                className="flex w-fit items-center gap-1 text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200"
-              >
-                {showOverride ? (
-                  <ChevronUp className="size-3.5" />
-                ) : (
-                  <ChevronDown className="size-3.5" />
-                )}
-                Advanced: prompt override
-              </button>
-              {showOverride && (
-                <textarea
-                  value={promptOverride}
-                  onChange={(e) => setPromptOverride(e.target.value)}
-                  rows={4}
-                  placeholder="Custom Seedream prompt. Must reference each image as 'Reference 1, 2, ...' for best results. Min 20 chars. Leave empty to use the auto-generated one."
-                  className="w-full resize-none rounded-lg border border-zinc-300 bg-white p-3 text-xs text-zinc-900 outline-none focus:border-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
-                />
+              {mode === "accessory" && (
+                <label className="flex items-start gap-2 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs dark:border-zinc-800 dark:bg-zinc-900">
+                  <input
+                    type="checkbox"
+                    checked={upscaleEnabled}
+                    onChange={(e) => setUpscaleEnabled(e.target.checked)}
+                    className="mt-0.5 size-3.5 accent-zinc-900 dark:accent-white"
+                  />
+                  <span className="flex flex-col gap-0.5">
+                    <span className="flex items-center gap-1 font-medium text-zinc-900 dark:text-zinc-100">
+                      <ArrowUpCircle className="size-3.5" />
+                      Upscale to ~3000×3000 px
+                    </span>
+                    <span className="text-zinc-500">
+                      PDP-grade output. Adds ~$0.03 per image and a few extra
+                      seconds. The eyewear brief calls for 3000×3000.
+                    </span>
+                  </span>
+                </label>
+              )}
+
+              {mode === "outfit" && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowOverride((v) => !v)}
+                    className="flex w-fit items-center gap-1 text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200"
+                  >
+                    {showOverride ? (
+                      <ChevronUp className="size-3.5" />
+                    ) : (
+                      <ChevronDown className="size-3.5" />
+                    )}
+                    Advanced: prompt override
+                  </button>
+                  {showOverride && (
+                    <textarea
+                      value={promptOverride}
+                      onChange={(e) => setPromptOverride(e.target.value)}
+                      rows={4}
+                      placeholder="Custom Seedream prompt. Must reference each image as 'Reference 1, 2, ...' for best results. Min 20 chars. Leave empty to use the auto-generated one."
+                      className="w-full resize-none rounded-lg border border-zinc-300 bg-white p-3 text-xs text-zinc-900 outline-none focus:border-zinc-900 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100"
+                    />
+                  )}
+                </>
               )}
 
               <button
@@ -649,11 +973,16 @@ export default function OutfitComposer({
                 {generating ? (
                   <>
                     <Loader2 className="size-4 animate-spin" />
-                    Composing... usually 6–10s per image
+                    {mode === "accessory" && upscaleEnabled
+                      ? "Composing + upscaling..."
+                      : "Composing... usually 6–10s per image"}
                   </>
                 ) : (
                   <>
-                    <Sparkles className="size-4" /> Compose outfit
+                    <Sparkles className="size-4" />{" "}
+                    {mode === "accessory"
+                      ? "Compose eyewear shot"
+                      : "Compose outfit"}
                   </>
                 )}
               </button>
@@ -685,7 +1014,12 @@ export default function OutfitComposer({
               )}
             </div>
 
-            <div className="flex aspect-[3/4] w-full items-center justify-center overflow-hidden rounded-xl border border-dashed border-zinc-300 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900">
+            <div
+              className={cn(
+                "flex w-full items-center justify-center overflow-hidden rounded-xl border border-dashed border-zinc-300 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900",
+                mode === "accessory" ? "aspect-square" : "aspect-[3/4]",
+              )}
+            >
               {generating ? (
                 <div className="flex flex-col items-center gap-3 text-zinc-500">
                   <Loader2 className="size-8 animate-spin" />
@@ -694,15 +1028,20 @@ export default function OutfitComposer({
               ) : result && result.images[selectedImageIdx] ? (
                 <SkeletonImage
                   src={result.images[selectedImageIdx].url}
-                  alt="Composed outfit"
+                  alt={mode === "accessory" ? "Eyewear shot" : "Composed outfit"}
                   className="group h-full w-full animate-fade-in"
                   objectFit="contain"
                   eager
                   onClick={() =>
                     setLightbox({
                       url: result.images[selectedImageIdx].url,
-                      alt: "Composed outfit",
-                      caption: `Composed outfit · ${modelLabel} · variation ${
+                      alt:
+                        mode === "accessory"
+                          ? "Eyewear shot"
+                          : "Composed outfit",
+                      caption: `${
+                        mode === "accessory" ? "Eyewear shot" : "Composed outfit"
+                      } · ${modelLabel} · variation ${
                         selectedImageIdx + 1
                       } of ${result.images.length}`,
                     })
@@ -712,7 +1051,11 @@ export default function OutfitComposer({
               ) : (
                 <div className="flex flex-col items-center gap-2 text-zinc-400">
                   <ImageIcon className="size-8" />
-                  <p className="text-xs">Your composition will appear here.</p>
+                  <p className="text-xs">
+                    {mode === "accessory"
+                      ? "Your eyewear shot will appear here."
+                      : "Your composition will appear here."}
+                  </p>
                 </div>
               )}
             </div>
@@ -978,6 +1321,142 @@ function Step({
 function CharacterTile({
   asset,
   selected,
+  pinning,
+  onClick,
+  onTogglePin,
+}: {
+  asset: Asset;
+  selected: boolean;
+  pinning?: boolean;
+  onClick: () => void;
+  onTogglePin?: () => void;
+}) {
+  return (
+    <div
+      className={cn(
+        "group relative shrink-0 overflow-hidden rounded-xl border-2 transition",
+        selected
+          ? "border-zinc-900 ring-2 ring-zinc-900/10 dark:border-white dark:ring-white/10"
+          : "border-transparent hover:border-zinc-300 dark:hover:border-zinc-700",
+      )}
+    >
+      <button
+        type="button"
+        onClick={onClick}
+        className="block"
+      >
+        <SkeletonImage
+          src={asset.publicUrl}
+          alt={asset.name}
+          className="h-36 w-28"
+          objectFit="cover"
+        />
+        <span className="absolute bottom-0 left-0 right-0 truncate bg-black/60 px-2 py-1 text-left text-[10px] text-white">
+          {asset.name}
+        </span>
+      </button>
+      {selected && (
+        <span className="pointer-events-none absolute right-1.5 top-1.5 flex size-5 items-center justify-center rounded-full bg-zinc-900 text-white dark:bg-white dark:text-zinc-950">
+          <CheckCircle2 className="size-3.5" />
+        </span>
+      )}
+      {onTogglePin && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onTogglePin();
+          }}
+          disabled={pinning}
+          title={asset.isPinned ? "Unpin model" : "Pin as recurring model"}
+          className={cn(
+            "absolute left-1.5 top-1.5 flex size-6 items-center justify-center rounded-full text-white shadow transition disabled:opacity-50",
+            asset.isPinned
+              ? "bg-amber-500 hover:bg-amber-400"
+              : "bg-black/55 opacity-0 hover:bg-black/75 group-hover:opacity-100",
+          )}
+        >
+          {pinning ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : asset.isPinned ? (
+            <Pin className="size-3.5" />
+          ) : (
+            <PinOff className="size-3.5" />
+          )}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ModeSwitch({
+  mode,
+  onChange,
+}: {
+  mode: ComposeMode;
+  onChange: (mode: ComposeMode) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-900 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+          Composition mode
+        </p>
+        <p className="text-xs text-zinc-700 dark:text-zinc-300">
+          {mode === "outfit"
+            ? "Full-body editorial outfit composition — 4:5 portrait, multi-garment."
+            : "Tight head-and-shoulders eyewear shot — 1:1 square, single accessory."}
+        </p>
+      </div>
+      <div className="inline-flex shrink-0 items-center rounded-lg border border-zinc-200 bg-white p-0.5 dark:border-zinc-700 dark:bg-zinc-950">
+        <ModeChip
+          active={mode === "outfit"}
+          onClick={() => onChange("outfit")}
+          icon={Shirt}
+          label="Outfit"
+        />
+        <ModeChip
+          active={mode === "accessory"}
+          onClick={() => onChange("accessory")}
+          icon={Glasses}
+          label="Accessory"
+        />
+      </div>
+    </div>
+  );
+}
+
+function ModeChip({
+  active,
+  onClick,
+  icon: Icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition",
+        active
+          ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-950"
+          : "text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100",
+      )}
+    >
+      <Icon className="size-3.5" />
+      {label}
+    </button>
+  );
+}
+
+function EyewearTile({
+  asset,
+  selected,
   onClick,
 }: {
   asset: Asset;
@@ -989,7 +1468,7 @@ function CharacterTile({
       type="button"
       onClick={onClick}
       className={cn(
-        "group relative shrink-0 overflow-hidden rounded-xl border-2 transition",
+        "group relative overflow-hidden rounded-lg border-2 transition",
         selected
           ? "border-zinc-900 ring-2 ring-zinc-900/10 dark:border-white dark:ring-white/10"
           : "border-transparent hover:border-zinc-300 dark:hover:border-zinc-700",
@@ -998,18 +1477,60 @@ function CharacterTile({
       <SkeletonImage
         src={asset.publicUrl}
         alt={asset.name}
-        className="h-36 w-28"
-        objectFit="cover"
+        className="aspect-square w-full bg-white dark:bg-zinc-950"
+        objectFit="contain"
       />
-      <span className="absolute bottom-0 left-0 right-0 truncate bg-black/60 px-2 py-1 text-left text-[10px] text-white">
+      <span className="absolute bottom-0 left-0 right-0 truncate bg-black/55 px-1.5 py-0.5 text-left text-[9px] text-white">
         {asset.name}
       </span>
       {selected && (
-        <span className="absolute right-1.5 top-1.5 flex size-5 items-center justify-center rounded-full bg-zinc-900 text-white dark:bg-white dark:text-zinc-950">
+        <span className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full bg-zinc-900 text-white dark:bg-white dark:text-zinc-950">
           <CheckCircle2 className="size-3.5" />
         </span>
       )}
     </button>
+  );
+}
+
+function SelectedAccessoryStrip({
+  asset,
+  onRemove,
+}: {
+  asset: Asset;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <Label small>Selected eyewear</Label>
+      <div className="flex items-center gap-2">
+        <div className="relative">
+          <SkeletonImage
+            src={asset.publicUrl}
+            alt={asset.name}
+            className="h-14 w-14 rounded border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900"
+            objectFit="contain"
+          />
+          <button
+            type="button"
+            onClick={onRemove}
+            className="absolute -right-1 -top-1 flex size-4 items-center justify-center rounded-full bg-zinc-900 text-white dark:bg-white dark:text-zinc-950"
+            title="Remove"
+          >
+            <X className="size-2.5" />
+          </button>
+        </div>
+        <div className="flex min-w-0 flex-col">
+          <span className="truncate text-xs font-medium text-zinc-900 dark:text-zinc-100">
+            {asset.name}
+          </span>
+          {asset.metadata.sku && (
+            <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+              SKU {asset.metadata.sku}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 

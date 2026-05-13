@@ -496,3 +496,164 @@ export async function composeOutfit(
     promptUsed: prompt,
   };
 }
+
+// =============================================================================
+// Accessory composition — eyewear-first PDP shots
+//
+// Sunglasses e-commerce work demands tight head-and-shoulders portraits with
+// the frame placed correctly on the bridge of the nose. Reusing composeOutfit
+// gives weak results: Seedream renders a full-body model, the glasses end up
+// floating, and the camera sits too far back to read frame details. This
+// pathway forces a portrait-crop output and bakes eyewear-specific guidance
+// (perspective foreshortening, lens reflections, frame shadow under the brow)
+// into the prompt.
+// =============================================================================
+
+export const ACCESSORY_COMPOSITION_MODEL = {
+  endpoint: "fal-ai/bytedance/seedream/v4.5/edit",
+  label: "Seedream 4.5 Edit (accessory portrait)",
+  estCostUsd: 0.06,
+} as const;
+
+/**
+ * Upscaler — used to push the 1024px square composition output up to the
+ * 3000×3000 final export the brief calls for. We pick Clarity Upscaler
+ * because it preserves skin/glass detail better than ESRGAN on portraits.
+ */
+export const UPSCALE_MODEL = {
+  endpoint: "fal-ai/clarity-upscaler",
+  label: "Clarity Upscaler",
+  estCostUsd: 0.03,
+} as const;
+
+export type AccessoryView = "front" | "three-quarter" | "side";
+
+export const ACCESSORY_VIEWS: Record<
+  AccessoryView,
+  { id: AccessoryView; label: string; hint: string; promptFragment: string }
+> = {
+  front: {
+    id: "front",
+    label: "Front",
+    hint: "Straight-on, both lenses visible",
+    promptFragment:
+      "camera positioned directly in front of the model at eye level, the model looking straight into the lens, both eyes and both lenses of the eyewear visible, the frame perfectly horizontal and symmetrically centred across the face",
+  },
+  "three-quarter": {
+    id: "three-quarter",
+    label: "Three-quarter",
+    hint: "30–40° angled, both temples partly visible",
+    promptFragment:
+      "the model turned thirty to forty degrees away from the camera in a natural three-quarter pose, near-side lens and temple arm clearly visible, the far temple arm fading toward the ear, the bridge of the nose and the frame's perspective foreshortening rendered believably",
+  },
+  side: {
+    id: "side",
+    label: "Side profile",
+    hint: "Pure 90° profile, full frame silhouette",
+    promptFragment:
+      "pure ninety-degree side profile of the model, the entire silhouette of the frame visible from temple to hinge to lens, the model's eyelashes faintly visible behind the lens, head held level, jawline clean against the backdrop",
+  },
+};
+
+export type ComposeAccessoryInput = {
+  characterUrl: string;
+  accessoryUrl: string;
+  accessoryName?: string;
+  view: AccessoryView;
+  backgroundPreset?: BackgroundPresetId;
+  numImages?: 1 | 2 | 3 | 4;
+};
+
+const ACCESSORY_FORBIDDENS =
+  "Do not alter the model's face, identity, skin tone, eye colour, hair, or expression. Do not modify the frame's colour, lens tint, shape, hinge style, or branding hardware. Do not add lens flare, glare, or reflections that are not consistent with the studio lighting. Do not distort frame proportions or tilt the frame off-axis. No text, watermarks, or logos beyond what is shown in the eyewear reference.";
+
+const ACCESSORY_PHOTOGRAPHY_STYLE =
+  "premium eyewear e-commerce campaign photography, hyperreal skin texture with visible pores, tight head-and-shoulders portrait, 85mm portrait lens, f/2.8 shallow depth of field, face and eyewear tack sharp, soft diffused beauty-dish front light with a subtle fill, magazine quality, 4K resolution";
+
+function buildAccessoryPrompt(input: ComposeAccessoryInput): string {
+  const viewFragment = ACCESSORY_VIEWS[input.view].promptFragment;
+  const namePart = input.accessoryName ? ` ("${input.accessoryName}")` : "";
+
+  const presetFragment = input.backgroundPreset
+    ? BACKGROUND_PRESETS[input.backgroundPreset].promptFragment
+    : BACKGROUND_PRESETS["studio-white"].promptFragment;
+
+  return [
+    // — Subject + action --------------------------------------------------
+    `Photograph the model from Image 1 wearing the eyewear shown in Image 2${namePart}.`,
+    // — Image-by-image roles ----------------------------------------------
+    "Image 1 shows the model — preserve their face, hair, skin tone, eye colour, and expression exactly as shown; do not redraw the face.",
+    `Image 2 shows the eyewear — preserve its frame shape, colour, material, lens tint, hinges, and any branding hardware exactly as shown.`,
+    // — Placement (CRITICAL for eyewear realism) --------------------------
+    "Place the eyewear naturally on the bridge of the nose: the nose pads rest on either side of the bridge, the frame top sits just below the brow, the temple arms follow the curve of the temples back toward and over the ears. Render correct perspective foreshortening for the chosen camera angle so the frame reads as a real 3D object and not a flat sticker. Add a soft realistic shadow cast by the frame onto the cheekbones and under the brow, matched to the lighting direction. Include subtle lens reflections that match the studio lighting — never invent new light sources.",
+    // — View / camera -----------------------------------------------------
+    `View: ${viewFragment}.`,
+    // — Framing -----------------------------------------------------------
+    "Tight head-and-shoulders portrait crop, the eyewear and full face filling the centre of the frame, shoulders just visible at the bottom edge, top of the head with a small margin above.",
+    // — Backdrop ----------------------------------------------------------
+    `Background: ${presetFragment}. Replace the product-packshot background of Image 2 with this scene — the eyewear must appear worn, not photographed against its own backdrop.`,
+    // — Style anchor ------------------------------------------------------
+    `Style: ${ACCESSORY_PHOTOGRAPHY_STYLE}.`,
+    // — Negative constraints ----------------------------------------------
+    ACCESSORY_FORBIDDENS,
+  ].join("\n\n");
+}
+
+export async function composeAccessory(
+  input: ComposeAccessoryInput,
+): Promise<FalResult & { promptUsed: string }> {
+  ensureConfigured();
+  if (!input.characterUrl)
+    throw new Error("composeAccessory: characterUrl is required.");
+  if (!input.accessoryUrl)
+    throw new Error("composeAccessory: accessoryUrl is required.");
+
+  const prompt = buildAccessoryPrompt(input);
+
+  const out = await fal.subscribe(ACCESSORY_COMPOSITION_MODEL.endpoint, {
+    input: {
+      prompt,
+      image_urls: [input.characterUrl, input.accessoryUrl],
+      // 1:1 square — eyewear PDP industry standard (Warby Parker, Ray-Ban,
+      // Persol, Bonlook all ship square 3000×3000 PDP shots). Square also
+      // upscales cleanly to the 3000px deliverable spec.
+      image_size: { width: 1024, height: 1024 },
+      num_images: input.numImages ?? 1,
+      max_images: input.numImages ?? 1,
+    },
+    logs: false,
+  });
+
+  return {
+    ...normaliseResult(out.data, out.requestId),
+    promptUsed: prompt,
+  };
+}
+
+/**
+ * Upscale a single fal-hosted image to ~3× resolution (1024 → ~3000).
+ * The brief specifies 3000×3000 final exports; clarity-upscaler holds skin
+ * texture and lens detail better than plain ESRGAN at this scale.
+ */
+export async function upscaleImage(input: {
+  imageUrl: string;
+  scale?: 2 | 3 | 4;
+}): Promise<FalResult> {
+  ensureConfigured();
+  if (!input.imageUrl) throw new Error("upscaleImage: imageUrl is required.");
+  const scale = input.scale ?? 3;
+
+  const out = await fal.subscribe(UPSCALE_MODEL.endpoint, {
+    input: {
+      image_url: input.imageUrl,
+      upscale_factor: scale,
+      // Low creativity keeps the upscaler faithful to the source — we are
+      // adding pixels, not hallucinating new content.
+      creativity: 0.35,
+      resemblance: 1.5,
+    },
+    logs: false,
+  });
+
+  return normaliseResult(out.data, out.requestId);
+}

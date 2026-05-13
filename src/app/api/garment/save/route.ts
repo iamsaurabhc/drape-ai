@@ -14,10 +14,20 @@ import { env } from "@/lib/env";
 
 const Body = z.object({
   name: z.string().min(1).max(80),
-  category: z.enum(["top", "bottom", "outer", "dress", "bag", "shoes", "accessory"]),
+  category: z.enum([
+    "top",
+    "bottom",
+    "outer",
+    "dress",
+    "bag",
+    "shoes",
+    "accessory",
+    "eyewear",
+  ]),
   sourceUrl: z.string().url(),
   prompt: z.string().optional(),
   generatedByModel: z.string().optional(),
+  sku: z.string().min(1).max(60).optional(),
 });
 
 export async function POST(req: Request) {
@@ -48,7 +58,11 @@ export async function POST(req: Request) {
       sourceUrl: body.sourceUrl,
       prompt: body.prompt,
       generatedByModel: body.generatedByModel,
-      metadata: { category: body.category, source: "generated" },
+      metadata: {
+        category: body.category,
+        source: "generated",
+        ...(body.sku ? { sku: body.sku } : {}),
+      },
     });
     return NextResponse.json(saved);
   } catch (err) {
