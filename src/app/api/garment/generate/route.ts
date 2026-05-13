@@ -15,7 +15,16 @@ import { env } from "@/lib/env";
 
 const Body = z.object({
   prompt: z.string().min(4, "Prompt must be at least 4 characters."),
-  category: z.enum(["top", "bottom", "outer", "dress", "bag", "shoes", "accessory"]),
+  category: z.enum([
+    "top",
+    "bottom",
+    "outer",
+    "dress",
+    "bag",
+    "shoes",
+    "accessory",
+    "eyewear",
+  ]),
   model: z.enum(Object.keys(GARMENT_MODELS) as ["nano-banana-pro", "flux-pro-1.1"]).optional(),
 });
 

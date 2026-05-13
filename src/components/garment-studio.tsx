@@ -26,7 +26,8 @@ type Category =
   | "dress"
   | "bag"
   | "shoes"
-  | "accessory";
+  | "accessory"
+  | "eyewear";
 
 type ModelId = "nano-banana-pro" | "flux-pro-1.1";
 
@@ -46,7 +47,11 @@ type SavedAsset = {
   publicUrl: string;
   prompt: string | null;
   generatedByModel: string | null;
-  metadata: { category?: Category; source?: "generated" | "uploaded" };
+  metadata: {
+    category?: Category;
+    source?: "generated" | "uploaded";
+    sku?: string;
+  };
   storedInSupabase: boolean;
 };
 
@@ -94,7 +99,13 @@ const PROMPT_TEMPLATES: Record<Category, string[]> = {
   accessory: [
     "tan leather belt, brushed silver buckle, 1.5 inch wide",
     "black wool felt fedora, narrow brim",
-    "amber tortoiseshell aviator sunglasses",
+    "silver chain necklace, layered, brushed finish",
+  ],
+  eyewear: [
+    "amber tortoiseshell aviator sunglasses, gold metal frame, gradient brown lenses",
+    "black acetate wayfarer sunglasses, slim arms, smoke lenses",
+    "matte black round metal sunglasses, polarised grey lenses",
+    "cream acetate cat-eye sunglasses, brown gradient lenses, gold hinges",
   ],
 };
 
@@ -120,6 +131,7 @@ export default function GarmentStudio({
   const [error, setError] = useState<string | null>(null);
 
   const [savingName, setSavingName] = useState("");
+  const [savingSku, setSavingSku] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<
     | null
@@ -128,6 +140,7 @@ export default function GarmentStudio({
   >(null);
 
   const [uploading, setUploading] = useState(false);
+  const [uploadSku, setUploadSku] = useState("");
   const [uploadStatus, setUploadStatus] = useState<
     null | { kind: "ok" } | { kind: "err"; message: string }
   >(null);
@@ -168,6 +181,10 @@ export default function GarmentStudio({
     setSaving(true);
     setSaveStatus(null);
     try {
+      const sku =
+        result.category === "eyewear" && savingSku.trim()
+          ? savingSku.trim()
+          : undefined;
       const res = await fetch("/api/garment/save", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -177,6 +194,7 @@ export default function GarmentStudio({
           sourceUrl: result.imageUrl,
           prompt: result.promptUsed,
           generatedByModel: result.model,
+          ...(sku ? { sku } : {}),
         }),
       });
       const data = await res.json();
@@ -196,7 +214,7 @@ export default function GarmentStudio({
     } finally {
       setSaving(false);
     }
-  }, [result, savingName, prompt]);
+  }, [result, savingName, savingSku, prompt]);
 
   const handleUpload = useCallback(
     async (file: File) => {
@@ -207,6 +225,9 @@ export default function GarmentStudio({
         fd.append("file", file);
         fd.append("name", file.name.replace(/\.[^.]+$/, "").slice(0, 60));
         fd.append("category", category);
+        if (category === "eyewear" && uploadSku.trim()) {
+          fd.append("sku", uploadSku.trim());
+        }
         const res = await fetch("/api/garment/upload", {
           method: "POST",
           body: fd,
@@ -230,7 +251,7 @@ export default function GarmentStudio({
         setUploading(false);
       }
     },
-    [category],
+    [category, uploadSku],
   );
 
   const handleDelete = useCallback(
@@ -266,6 +287,7 @@ export default function GarmentStudio({
       bag: [],
       shoes: [],
       accessory: [],
+      eyewear: [],
     };
     const uncategorised: SavedAsset[] = [];
     for (const a of assets) {
@@ -275,6 +297,31 @@ export default function GarmentStudio({
     }
     return { buckets, uncategorised };
   }, [assets]);
+
+  // Eyewear has a SKU-grouped sub-view (a single sunglasses model usually
+  // ships in 4–6 colour variants — the brief calls them "folders"). When the
+  // user filters to eyewear, we render those groups instead of a flat grid.
+  const eyewearBySku = useMemo(() => {
+    if (libraryFilter !== "eyewear") return null;
+    const groups = new Map<string, { sku: string; items: SavedAsset[] }>();
+    const ungrouped: SavedAsset[] = [];
+    for (const a of assetsByCategory.buckets.eyewear ?? []) {
+      const sku = a.metadata.sku?.trim();
+      if (sku) {
+        const g = groups.get(sku);
+        if (g) g.items.push(a);
+        else groups.set(sku, { sku, items: [a] });
+      } else {
+        ungrouped.push(a);
+      }
+    }
+    return {
+      groups: Array.from(groups.values()).sort((a, b) =>
+        a.sku.localeCompare(b.sku),
+      ),
+      ungrouped,
+    };
+  }, [libraryFilter, assetsByCategory]);
 
   return (
     <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-6 py-10">
@@ -405,6 +452,17 @@ export default function GarmentStudio({
             <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
               <Upload className="size-3.5" /> Or upload a real product photo
             </div>
+            {category === "eyewear" && (
+              <div className="mb-2">
+                <Label small>SKU (optional)</Label>
+                <input
+                  value={uploadSku}
+                  onChange={(e) => setUploadSku(e.target.value)}
+                  placeholder="e.g. SG-1042 — colour variants share this code"
+                  className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-zinc-900 dark:border-zinc-700 dark:bg-zinc-950"
+                />
+              </div>
+            )}
             <label className="block">
               <input
                 type="file"
@@ -490,6 +548,17 @@ export default function GarmentStudio({
                     className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-zinc-900 dark:border-zinc-700 dark:bg-zinc-950"
                   />
                 </div>
+                {result.category === "eyewear" && (
+                  <div className="sm:w-40">
+                    <Label small>SKU (optional)</Label>
+                    <input
+                      value={savingSku}
+                      onChange={(e) => setSavingSku(e.target.value)}
+                      placeholder="e.g. SG-1042"
+                      className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-zinc-900 dark:border-zinc-700 dark:bg-zinc-950"
+                    />
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <button
                     type="button"
@@ -579,6 +648,65 @@ export default function GarmentStudio({
               No garments yet — generate or upload one above.
             </p>
           </div>
+        ) : libraryFilter === "eyewear" && eyewearBySku ? (
+          // Eyewear filtered view: SKU-grouped sub-folders (the brief's
+          // "one folder per sunglasses model" structure).
+          filteredAssets.length === 0 ? (
+            <EmptyCategoryNote categoryLabel="Eyewear" />
+          ) : (
+            <div className="flex flex-col gap-6">
+              {eyewearBySku.groups.map((g) => (
+                <div key={g.sku} className="flex flex-col gap-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-700 dark:text-zinc-300">
+                    SKU {g.sku}{" "}
+                    <span className="text-zinc-400">({g.items.length})</span>
+                  </h3>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                    {g.items.map((a) => (
+                      <LibraryTile
+                        key={a.id ?? a.publicUrl}
+                        asset={a}
+                        onDelete={handleDelete}
+                        onView={() =>
+                          setLightbox({
+                            url: a.publicUrl,
+                            alt: a.name,
+                            caption: `eyewear · SKU ${g.sku} · ${a.name}`,
+                          })
+                        }
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {eyewearBySku.ungrouped.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
+                    No SKU{" "}
+                    <span className="text-zinc-400">
+                      ({eyewearBySku.ungrouped.length})
+                    </span>
+                  </h3>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                    {eyewearBySku.ungrouped.map((a) => (
+                      <LibraryTile
+                        key={a.id ?? a.publicUrl}
+                        asset={a}
+                        onDelete={handleDelete}
+                        onView={() =>
+                          setLightbox({
+                            url: a.publicUrl,
+                            alt: a.name,
+                            caption: `eyewear · ${a.name}`,
+                          })
+                        }
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )
         ) : libraryFilter !== "all" ? (
           // Filtered view: flat grid of one category
           filteredAssets.length === 0 ? (

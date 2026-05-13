@@ -16,11 +16,15 @@ export type GarmentCategory =
   | "dress"
   | "bag"
   | "shoes"
-  | "accessory";
+  | "accessory"
+  | "eyewear";
 
 export type AssetMetadata = {
   category?: GarmentCategory;
   source?: "generated" | "uploaded";
+  // Optional SKU — used by eyewear so colour variations of the same frame
+  // can be grouped together in the library. Indexed in 0006_accessories.sql.
+  sku?: string;
   [key: string]: unknown;
 };
 
@@ -33,6 +37,7 @@ export type SavedAsset = {
   generatedByModel: string | null;
   metadata: AssetMetadata;
   storedInSupabase: boolean;
+  isPinned?: boolean;
 };
 
 export type SaveAssetInput = {
@@ -192,6 +197,7 @@ export async function listAssets(opts: {
   type?: AssetType;
   category?: GarmentCategory;
   limit?: number;
+  pinnedOnly?: boolean;
 }): Promise<SavedAsset[]> {
   if (!env.supabase.isConfigured() || !env.supabase.serviceRoleKey()) {
     return [];
@@ -200,12 +206,16 @@ export async function listAssets(opts: {
   let q = sb
     .from("assets")
     .select(
-      "id, name, type, prompt, generated_by_model, image_url, metadata, created_at",
+      "id, name, type, prompt, generated_by_model, image_url, metadata, is_pinned, created_at",
     )
+    // Pinned models first, then most-recent; matches the Composer's "6
+    // recurring models" affordance from the eyewear-catalogue brief.
+    .order("is_pinned", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(opts.limit ?? 200);
   if (opts.type) q = q.eq("type", opts.type);
   if (opts.category) q = q.eq("metadata->>category", opts.category);
+  if (opts.pinnedOnly) q = q.eq("is_pinned", true);
 
   const { data, error } = await q;
   if (error) throw new Error(`Supabase select failed: ${error.message}`);
@@ -219,7 +229,31 @@ export async function listAssets(opts: {
     generatedByModel: (row.generated_by_model as string | null) ?? null,
     metadata: (row.metadata as AssetMetadata | null) ?? {},
     storedInSupabase: true,
+    isPinned: Boolean(row.is_pinned),
   }));
+}
+
+/**
+ * Toggle (or explicitly set) the `is_pinned` flag on an asset.
+ * Used by the Composer to surface a small set of recurring models for the
+ * eyewear catalogue workflow — pinned characters render first.
+ */
+export async function setAssetPinned(
+  id: string,
+  pinned: boolean,
+): Promise<{ id: string; isPinned: boolean }> {
+  if (!env.supabase.isConfigured() || !env.supabase.serviceRoleKey()) {
+    throw new Error("Supabase must be configured to pin assets.");
+  }
+  const sb = supabaseServer();
+  const { data, error } = await sb
+    .from("assets")
+    .update({ is_pinned: pinned })
+    .eq("id", id)
+    .select("id, is_pinned")
+    .single();
+  if (error) throw new Error(`Supabase update failed: ${error.message}`);
+  return { id: data.id as string, isPinned: Boolean(data.is_pinned) };
 }
 
 export async function deleteAsset(id: string): Promise<void> {
