@@ -20,7 +20,12 @@ export const GARMENT_CATEGORIES: {
   { id: "dress", label: "Dress / one-piece", examples: "dress, jumpsuit, romper" },
   { id: "bag", label: "Bag", examples: "handbag, tote, crossbody, backpack" },
   { id: "shoes", label: "Shoes", examples: "sneakers, boots, heels, loafers" },
-  { id: "accessory", label: "Accessory", examples: "belt, hat, scarf, sunglasses" },
+  { id: "accessory", label: "Accessory", examples: "belt, hat, scarf" },
+  {
+    id: "eyewear",
+    label: "Eyewear",
+    examples: "sunglasses, optical frames, aviators, wayfarers",
+  },
 ];
 
 const CATEGORY_PROMPT_FRAGMENT: Record<GarmentCategory, string> = {
@@ -31,6 +36,8 @@ const CATEGORY_PROMPT_FRAGMENT: Record<GarmentCategory, string> = {
   bag: "product photo, isolated, three-quarter angle showing strap and front face, no body",
   shoes: "product photo, side profile, both shoes visible if pair, isolated on white",
   accessory: "product photo, clean isolated, no body, clear material detail",
+  eyewear:
+    "eyewear product packshot, isolated on pure white, three-quarter front angle, both lenses and one temple arm visible, no model, sharp focus on frame edges and hinges, soft even studio lighting, no harsh reflections on the lenses, no shadow on the backdrop",
 };
 
 export type GenerateGarmentInput = {

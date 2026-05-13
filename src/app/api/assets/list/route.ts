@@ -17,6 +17,7 @@ const VALID_CATEGORIES: GarmentCategory[] = [
   "bag",
   "shoes",
   "accessory",
+  "eyewear",
 ];
 
 export async function GET(req: Request) {
@@ -24,6 +25,7 @@ export async function GET(req: Request) {
   const typeParam = url.searchParams.get("type");
   const categoryParam = url.searchParams.get("category");
   const limitParam = url.searchParams.get("limit");
+  const pinnedParam = url.searchParams.get("pinned");
 
   const type =
     typeParam && VALID_TYPES.includes(typeParam as AssetType)
@@ -35,9 +37,10 @@ export async function GET(req: Request) {
       ? (categoryParam as GarmentCategory)
       : undefined;
   const limit = limitParam ? Math.min(parseInt(limitParam, 10) || 200, 500) : 200;
+  const pinnedOnly = pinnedParam === "true" || pinnedParam === "1";
 
   try {
-    const assets = await listAssets({ type, category, limit });
+    const assets = await listAssets({ type, category, limit, pinnedOnly });
     return NextResponse.json({ assets });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error.";

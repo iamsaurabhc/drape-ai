@@ -23,6 +23,7 @@ const VALID_CATEGORIES: GarmentCategory[] = [
   "bag",
   "shoes",
   "accessory",
+  "eyewear",
 ];
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB safety cap
@@ -51,6 +52,7 @@ export async function POST(req: Request) {
   const file = form.get("file");
   const nameField = form.get("name");
   const categoryField = form.get("category");
+  const skuField = form.get("sku");
 
   if (!(file instanceof File)) {
     return NextResponse.json(
@@ -90,6 +92,8 @@ export async function POST(req: Request) {
 
   try {
     const bytes = await file.arrayBuffer();
+    const sku =
+      typeof skuField === "string" && skuField.trim() ? skuField.trim() : undefined;
     const saved = await uploadAsset({
       name: nameField.trim(),
       type: "garment",
@@ -98,6 +102,7 @@ export async function POST(req: Request) {
       metadata: {
         category: categoryField as GarmentCategory,
         source: "uploaded",
+        ...(sku ? { sku } : {}),
       },
     });
     return NextResponse.json(saved);

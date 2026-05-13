@@ -1,13 +1,13 @@
 {
   "name": "drape",
   "version": "0.1.0",
-  "description": "AI fashion photos at batch scale — generate hyperreal models, generate garments, compose multi-garment outfits at $0.06 per image.",
+  "description": "AI fashion photos at batch scale \u2014 generate hyperreal models, generate garments, compose multi-garment outfits at $0.06 per image.",
   "license": "MIT",
   "private": false,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
+    "dev": "node init && next dev",
+    "build": "node init && next build",
+    "start": "node init && next start",
     "lint": "eslint"
   },
   "dependencies": {
